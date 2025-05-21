@@ -1,12 +1,18 @@
+import os
+
 import cv2
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
+from torch.utils.data import DataLoader
 
 from embedding.pose_embedding import PoseEmbedding
+from models.siamese_dataset import SiamesePoseDateset
+from models.siamese_model import SiameseModel, ContrastiveLoss
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
 
 if __name__ == '__main__':
-    #step 1: Extract keypoints from video
+    # step 1: Extract keypoints from video
     # estimator = ViTPoseEstimator()
     # user1_keypoints = estimator.extract_keypoints( 'dataset/VIDEO_RGB/forehand_openstands/p9_foreopen_s3.avi', save_name='user1_video_keypoints')
     # user2_keypoints = estimator.extract_keypoints( 'dataset/VIDEO_RGB/forehand_openstands/p9_foreopen_s3.avi', save_name='user2_video_keypoints')
@@ -16,7 +22,7 @@ if __name__ == '__main__':
     # print("Shape:", keypoints.shape)
     # print("Example keypoint:", keypoints[70][0])  # Show one from frame 70
 
-    #step 2: Generate pose embedding
+    # step 2: Generate pose embedding
     ## -------- Generate pose embedding -------- ##
     poseEmbedding = PoseEmbedding(confidence_threshold=0.6)
     user1_embedding = poseEmbedding.generate_from_file("dataset/keypoints/user1_video_keypoints.npy")
@@ -24,6 +30,36 @@ if __name__ == '__main__':
     print("Pose embedding shape:", user1_embedding.shape)
     print("Pose embedding shape:", user2_embedding.shape)
 
+    ## Save the embeddings
+    user1_embedding_path = os.path.join('dataset/embeddings', 'user1_embedding.npy')
+    user2_embedding_path = os.path.join('dataset/embeddings', 'user2_embedding.npy')
+    os.makedirs('dataset/embeddings', exist_ok=True)
+    np.save(user1_embedding_path, user1_embedding)
+    np.save(user2_embedding_path, user2_embedding)
+
+    pairs = [(user1_embedding_path, user2_embedding_path)]
+    labels = [0]
+
+    ## -------- Load the dataset -------- ##
+    dataset = SiamesePoseDateset(pairs, labels)
+    print("Dataset length:", len(dataset))
+    loader = DataLoader(dataset, batch_size=1, shuffle=True)
+
+    model = SiameseModel()
+    loss_fn = ContrastiveLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    epochs = 10
+    for epoch in range(epochs):
+        for i, (emb1, emb2, label) in enumerate(loader):
+            optimizer.zero_grad()
+            distance = model(emb1, emb2)
+            loss = loss_fn(distance, label)
+            loss.backward()
+            optimizer.step()
+
+            if i % 10 == 0:
+                print(f"Epoch {epoch}, Step {i}, Loss: {loss.item()}")
 
 
     ## -------- Display keypoints on a frame -------- ##

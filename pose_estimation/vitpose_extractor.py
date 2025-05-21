@@ -6,13 +6,30 @@ import os
 # MMPose Inferencer. It’s a unified inferencer interface for pose estimation task, currently including: Pose2D.
 # and it can be used to perform 2D keypoint detection.
 class ViTPoseEstimator:
+    """
+    Class to extract 2D pose keypoints from a video using MMPose.
+    The extracted keypoints are saved in a .npy file.
+    The keypoints are in the format (x, y, score) for each of the 17 keypoints.
+    """
+
     def __init__(self, output='dataset/keypoints', model='vitpose-s'):
+        """
+        Initialize the ViTPoseEstimator with the specified model and output directory.
+        :param output: Directory to save the extracted keypoints.
+        :param model: vitpose-s, vitpose-m, vitpose-l
+        """
         # Initialize the MMPoseInferencer with the specified model and output directory from API.
         self.inferencer = MMPoseInferencer(pose2d=model, det_model='yolox_tiny_8x8_300e_coco', device='cpu')
         self.output_dir = output
         os.makedirs(output, exist_ok=True)
 
     def extract_keypoints(self, video_path: str, save_name: str = None):
+        """
+        Extract keypoints from a video and save them to a .npy file.
+        :param video_path:
+        :param save_name:
+        :return: keypoints_array: A numpy array of shape (N, 17, 3) where N is the number of frames.
+        """
         if save_name is None:
             save_name = os.path.splitext(os.path.basename(video_path))[0]
 
@@ -37,5 +54,4 @@ class ViTPoseEstimator:
         save_path = os.path.join(self.output_dir, f'{save_name}.npy')
         np.save(save_path, keypoints_array)
 
-        print(f'Keypoints saved to {save_path}')
         return keypoints_array

@@ -2,6 +2,9 @@ import numpy as np
 
 
 class PoseEmbedding:
+    """
+    Class to generate a fixed-size embedding for a sequence of pose keypoints.
+    """
     def __init__(self, confidence_threshold=0.5):
         self.confidence_threshold = confidence_threshold
 
@@ -9,6 +12,7 @@ class PoseEmbedding:
         """
         Normalize the pose keypoints to a fixed size and center them.
         :param keypoints: A single frame of keypoints with shape (17, 3).
+        :return: Normalized keypoints with shape (17, 3).
         """
         # getting the left shoulder keypoint and return the x and y coordinates Shape: (71, 17, 3)
         left_shoulder = keypoints[5, :2]
@@ -20,7 +24,7 @@ class PoseEmbedding:
         # Normalize the keypoints
         normalized_keypoints = (keypoints[:, :2] - center) / shoulder_distance
         confidence = keypoints[:, 2:3]
-        return np.concatenate((normalized_keypoints, confidence), axis=1)  # shape: (17, 3)
+        return np.concatenate((normalized_keypoints, confidence), axis=1)
 
     def generate_embedding(self, keypoints_seq):
         """
