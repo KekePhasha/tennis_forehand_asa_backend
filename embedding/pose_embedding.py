@@ -6,6 +6,10 @@ class PoseEmbedding:
     Class to generate a fixed-size embedding for a sequence of pose keypoints.
     """
     def __init__(self, confidence_threshold=0.5):
+        """
+        Initialize the PoseEmbedding class with a confidence threshold.
+        :param confidence_threshold:
+        """
         self.confidence_threshold = confidence_threshold
 
     def normalize_pose(self, keypoints):

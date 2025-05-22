@@ -1,5 +1,4 @@
 import os
-
 import cv2
 import numpy as np
 import torch
@@ -7,15 +6,17 @@ from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
 from embedding.pose_embedding import PoseEmbedding
-from models.siamese_dataset import SiamesePoseDateset
+from models.siamese_dataset import SiamesePoseDataset
 from models.siamese_model import SiameseModel, ContrastiveLoss
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
 
 if __name__ == '__main__':
     # step 1: Extract keypoints from video
-    # estimator = ViTPoseEstimator()
-    # user1_keypoints = estimator.extract_keypoints( 'dataset/VIDEO_RGB/forehand_openstands/p9_foreopen_s3.avi', save_name='user1_video_keypoints')
-    # user2_keypoints = estimator.extract_keypoints( 'dataset/VIDEO_RGB/forehand_openstands/p9_foreopen_s3.avi', save_name='user2_video_keypoints')
+    estimator = ViTPoseEstimator()
+    user1_keypoints = estimator.extract_keypoints('dataset/VIDEO_RGB/forehand_openstands/p9_foreopen_s3.avi',
+                                                  'user1_video_keypoints')
+    user2_keypoints = estimator.extract_keypoints('dataset/VIDEO_RGB/forehand_openstands/p8_foreopen_s1.avi',
+                                                  'user2_video_keypoints')
 
     # Load keypoints from .npy
     # keypoints = np.load("dataset/keypoints/sample_video_keypoints.npy")
@@ -24,7 +25,7 @@ if __name__ == '__main__':
 
     # step 2: Generate pose embedding
     ## -------- Generate pose embedding -------- ##
-    poseEmbedding = PoseEmbedding(confidence_threshold=0.6)
+    poseEmbedding = PoseEmbedding(0.6)
     user1_embedding = poseEmbedding.generate_from_file("dataset/keypoints/user1_video_keypoints.npy")
     user2_embedding = poseEmbedding.generate_from_file("dataset/keypoints/user2_video_keypoints.npy")
     print("Pose embedding shape:", user1_embedding.shape)
@@ -37,11 +38,15 @@ if __name__ == '__main__':
     np.save(user1_embedding_path, user1_embedding)
     np.save(user2_embedding_path, user2_embedding)
 
-    pairs = [(user1_embedding_path, user2_embedding_path)]
-    labels = [0]
+    pairs = [
+        (user1_embedding_path, user2_embedding_path),
+        (user1_embedding_path, user1_embedding_path),
+        (user2_embedding_path, user2_embedding_path),
+    ]
+    labels = [0, 1, 1]  # 1 for similar, 0 for dissimilar
 
     ## -------- Load the dataset -------- ##
-    dataset = SiamesePoseDateset(pairs, labels)
+    dataset = SiamesePoseDataset(pairs, labels)
     print("Dataset length:", len(dataset))
     loader = DataLoader(dataset, batch_size=1, shuffle=True)
 
@@ -61,6 +66,19 @@ if __name__ == '__main__':
             if i % 10 == 0:
                 print(f"Epoch {epoch}, Step {i}, Loss: {loss.item()}")
 
+    torch.save(model.state_dict(), 'models/siamese_model.pth')
+
+    model.eval()
+
+    user_1_tensor = torch.from_numpy(user1_embedding).unsqueeze(0).float()
+    user_2_tensor = torch.from_numpy(user2_embedding).unsqueeze(0).float()
+
+    with torch.no_grad():
+        distance = model(user_1_tensor, user_2_tensor).item()
+
+    similarity_score = 1 / (1 + distance)
+
+    print(f"Similarity score: {similarity_score:.2f}")
 
     ## -------- Display keypoints on a frame -------- ##
     # Open video and go to frame 70

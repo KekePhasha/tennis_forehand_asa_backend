@@ -2,7 +2,13 @@ import numpy as np
 from torch.utils.data import Dataset
 
 
-class SiamesePoseDateset(Dataset):
+class SiamesePoseDataset(Dataset):
+    """
+    Custom dataset for Siamese network with pose embeddings.
+    This dataset takes pairs of keypoints and their corresponding labels.
+    The labels indicate whether the pairs are similar (1) or dissimilar (0).
+    The dataset is used for training a Siamese network to learn a similarity function.
+    """
     def __init__(self, pairs, labels):
         """
         Initialize the SiamesePoseDataset with pairs of keypoints and their labels.
