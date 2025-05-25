@@ -1,13 +1,12 @@
 import os
-import cv2
 import numpy as np
 import torch
-from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
 from embedding.pose_embedding import PoseEmbedding
-from models.siamese_dataset import SiamesePoseDataset
-from models.siamese_model import SiameseModel, ContrastiveLoss
+from training.siamese_dataset import SiamesePoseDataset
+from models.siamese_model import SiameseModel
+from training.loss import ContrastiveLoss
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
 
 if __name__ == '__main__':
@@ -48,7 +47,7 @@ if __name__ == '__main__':
     ## -------- Load the dataset -------- ##
     dataset = SiamesePoseDataset(pairs, labels)
     print("Dataset length:", len(dataset))
-    loader = DataLoader(dataset, batch_size=1, shuffle=True)
+    loader = DataLoader(dataset, batch_size=3, shuffle=True, drop_last=True)
 
     model = SiameseModel()
     loss_fn = ContrastiveLoss()
@@ -58,7 +57,7 @@ if __name__ == '__main__':
     for epoch in range(epochs):
         for i, (emb1, emb2, label) in enumerate(loader):
             optimizer.zero_grad()
-            distance = model(emb1, emb2)
+            distance = model.forward(emb1, emb2)
             loss = loss_fn(distance, label)
             loss.backward()
             optimizer.step()
@@ -68,13 +67,12 @@ if __name__ == '__main__':
 
     torch.save(model.state_dict(), 'models/siamese_model.pth')
 
-    model.eval()
-
     user_1_tensor = torch.from_numpy(user1_embedding).unsqueeze(0).float()
     user_2_tensor = torch.from_numpy(user2_embedding).unsqueeze(0).float()
 
+    model.eval()
     with torch.no_grad():
-        distance = model(user_1_tensor, user_2_tensor).item()
+        distance = model.forward(user_1_tensor, user_1_tensor).item()
 
     similarity_score = 1 / (1 + distance)
 

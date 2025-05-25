@@ -25,6 +25,11 @@ class SiamesePoseDataset(Dataset):
         return len(self.pairs)
 
     def __getitem__(self, idx):
+        """
+        Get the item at the specified index.
+        :param idx:  Index of the item to retrieve.
+        :return:  Tuple containing the two embeddings and their label. (emb1, emb2, label)
+        """
         path1, path2 = self.pairs[idx]
         emb1 = np.load(path1).astype(np.float32)
         emb2 = np.load(path2).astype(np.float32)

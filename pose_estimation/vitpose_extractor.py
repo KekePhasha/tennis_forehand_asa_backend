@@ -3,8 +3,6 @@ import numpy as np
 import os
 
 
-# MMPose Inferencer. It’s a unified inferencer interface for pose estimation task, currently including: Pose2D.
-# and it can be used to perform 2D keypoint detection.
 class ViTPoseEstimator:
     """
     Class to extract 2D pose keypoints from a video using MMPose.
@@ -19,7 +17,7 @@ class ViTPoseEstimator:
         :param model: vitpose-s, vitpose-m, vitpose-l
         """
         # Initialize the MMPoseInferencer with the specified model and output directory from API.
-        self.inferencer = MMPoseInferencer(pose2d=model, det_model='yolox_tiny_8x8_300e_coco', device='cpu')
+        self.inferencer = MMPoseInferencer(pose2d=model, device='cpu')
         self.output_dir = output
         os.makedirs(output, exist_ok=True)
 
@@ -34,10 +32,9 @@ class ViTPoseEstimator:
             save_name = os.path.splitext(os.path.basename(video_path))[0]
 
         keypoints_per_frame = []
-        result_generator = self.inferencer(video_path, show=False)
+        result_generator = self.inferencer(video_path, vis_out_dir='dataset/keypoints/vis', black_background=True)
 
         for result in result_generator:
-            frame_kpts = None
             # Check if there is at least one prediction
             if result.get('predictions') and len(result['predictions'][0]) > 0:
                 first_instance = result['predictions'][0][0]  # First person in batch[0]

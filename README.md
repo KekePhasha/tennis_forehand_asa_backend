@@ -25,3 +25,8 @@ This project uses 2D human pose estimation and a Siamese neural network to asses
 
 ```bash
 pip install -r requirements.txt
+```
+
+### Resources
+- VitPose -  https://mmpose.readthedocs.io/en/latest/user_guides/inference.html
+-  torch.nn - https://docs.pytorch.org/docs/stable/nn.html
