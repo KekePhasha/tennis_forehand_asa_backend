@@ -72,7 +72,7 @@ if __name__ == '__main__':
 
     model.eval()
     with torch.no_grad():
-        distance = model.forward(user_1_tensor, user_1_tensor).item()
+        distance = model.forward(user_1_tensor, user_2_tensor).item()
 
     similarity_score = 1 / (1 + distance)
 

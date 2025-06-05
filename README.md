@@ -22,6 +22,7 @@ This project uses 2D human pose estimation and a Siamese neural network to asses
 - NumPy
 - MMPose/mmcv
 - Matplotlib
+- Flask
 
 ```bash
 pip install -r requirements.txt
