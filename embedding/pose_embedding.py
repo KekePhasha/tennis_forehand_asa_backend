@@ -12,7 +12,8 @@ class PoseEmbedding:
         """
         self.confidence_threshold = confidence_threshold
 
-    def normalize_pose(self, keypoints):
+    @staticmethod
+    def normalize_pose(keypoints):
         """
         Normalize the pose keypoints to a fixed size and center them.
         :param keypoints: A single frame of keypoints with shape (17, 3).
