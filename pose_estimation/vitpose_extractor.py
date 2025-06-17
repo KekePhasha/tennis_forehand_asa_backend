@@ -2,6 +2,8 @@ from mmpose.apis import MMPoseInferencer
 import numpy as np
 import os
 
+from utils.file_utils import FileSaver
+
 
 class ViTPoseEstimator:
     """
@@ -10,16 +12,15 @@ class ViTPoseEstimator:
     The keypoints are in the format (x, y, score) for each of the 17 keypoints.
     """
 
-    def __init__(self, output='dataset/keypoints', model='vitpose-s'):
+    def __init__(self, saver: FileSaver, model='vitpose-s'):
         """
         Initialize the ViTPoseEstimator with the specified model and output directory.
-        :param output: Directory to save the extracted keypoints.
+        :param saver: An instance of FileSaver to handle saving keypoints.
         :param model: vitpose-s, vitpose-m, vitpose-l
         """
         # Initialize the MMPoseInferencer with the specified model and output directory from API.
         self.inferencer = MMPoseInferencer(pose2d=model, device='cpu')
-        self.output_dir = output
-        os.makedirs(output, exist_ok=True)
+        self.fileSaver = saver
 
     def extract_keypoints(self, video_path: str, save_name: str = None):
         """
@@ -32,7 +33,7 @@ class ViTPoseEstimator:
             save_name = os.path.splitext(os.path.basename(video_path))[0]
 
         keypoints_per_frame = []
-        result_generator = self.inferencer(video_path, vis_out_dir='dataset/keypoints/vis', black_background=True)
+        result_generator = self.inferencer(video_path, black_background=True)
 
         for result in result_generator:
             # Check if there is at least one prediction
@@ -48,7 +49,4 @@ class ViTPoseEstimator:
             keypoints_per_frame.append(frame_kpts)
 
         keypoints_array = np.array(keypoints_per_frame)
-        save_path = os.path.join(self.output_dir, f'{save_name}.npy')
-        np.save(save_path, keypoints_array)
-
-        return keypoints_array
+        return self.fileSaver.save_keypoints(video_path, save_name, keypoints_array)
