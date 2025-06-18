@@ -24,7 +24,7 @@ class ContrastiveLoss(nn.Module):
         :param label: Label indicating whether the pair is similar (1) or dissimilar (0).
         :return: Computed contrastive loss.
         """
-        print("Distance:", distance)
+        # print("Distance:", distance)
 
         similar_loss = (1 - label) * distance ** 2
         dissimilar_loss = label * (torch.clamp(self.margin - distance, min=0.0) ** 2)

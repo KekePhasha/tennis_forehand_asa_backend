@@ -8,31 +8,35 @@ from training.siamese_dataset import SiamesePoseDataset
 from models.siamese_model import SiameseModel
 from training.loss import ContrastiveLoss
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
+from training.train_model import TrainModel
 from utils.file_utils import FileSaver
 
 if __name__ == '__main__':
-    fileSaver = FileSaver()
-    estimator = ViTPoseEstimator(fileSaver)
-    poseEmbedding = PoseEmbedding(0.6)
-    ### Training a Siamese Network for Pose Similarity ###
-    video_root = 'dataset/VIDEO_RGB/forehand_openstands'
-    keypoint_dir = 'dataset/keypoints'
-    embedding_dir = 'dataset/embeddings'
+    trainer = TrainModel()
+    # trainer.extract_all_keypoints()
+    # trainer.generate_all_embeddings()
+    pairs, labels = trainer.generate_pairs()
+    dataset = SiamesePoseDataset(pairs, labels)
+    loader = DataLoader(dataset, batch_size=4, shuffle=True)
 
-    os.makedirs(keypoint_dir, exist_ok=True)
-    os.makedirs(embedding_dir, exist_ok=True)
+    model = SiameseModel()
+    loss_fn = ContrastiveLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-    # step 1: Extract keypoints from all videos
-    for label in ["positive", "negative"]:
-        label_path = os.path.join(video_root, label)
-        for video_file in os.listdir(label_path):
-            if video_file.endswith('.avi'):
-                video_path = os.path.join(label_path, video_file)
-                keypoint_name = video_path.replace('.avi', '')
-                save_name = os.path.splitext(video_file)[0]
-                estimator.extract_keypoints(video_path, save_name)
+    epochs = 40
+    for epoch in range(epochs):
+        for i, (emb1, emb2, label) in enumerate(loader):
+            optimizer.zero_grad()
+            distance = model.forward(emb1, emb2)
+            loss = loss_fn(distance, label)
+            loss.backward()
+            optimizer.step()
 
+            if i % 10 == 0:
+                print(f"Epoch {epoch}, Step {i}, Loss: {loss.item()}")
 
+    torch.save(model.state_dict(), 'models/siamese_model.pth')
+    print("Training completed. Model saved to 'models/siamese_model.pth'")
 
     # step 2: Generate pose embedding
     ## -------- Generate pose embedding -------- ##

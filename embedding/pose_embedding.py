@@ -58,3 +58,4 @@ class PoseEmbedding:
         """
         keypoints_seq = np.load(keypoints_file)
         return self.generate_embedding(keypoints_seq)
+
