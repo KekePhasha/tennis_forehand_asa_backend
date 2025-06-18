@@ -49,4 +49,5 @@ class ViTPoseEstimator:
             keypoints_per_frame.append(frame_kpts)
 
         keypoints_array = np.array(keypoints_per_frame)
-        return self.fileSaver.save_keypoints(video_path, save_name, keypoints_array)
+        saved_path = self.fileSaver.save_keypoints(video_path, save_name, keypoints_array)
+        return keypoints_array, saved_path

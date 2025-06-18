@@ -1,5 +1,6 @@
 import os
 import tempfile
+import traceback
 
 import torch
 from flask import Flask, request, jsonify
@@ -8,28 +9,23 @@ from flask_cors import CORS
 from embedding.pose_embedding import PoseEmbedding
 from models.siamese_model import SiameseModel
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
+from utils.file_utils import FileSaver
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:3000"])
 
-pose_estimator = ViTPoseEstimator()
+pose_estimator = ViTPoseEstimator(FileSaver())
 pose_embedding = PoseEmbedding(confidence_threshold=0.6)
 model = SiameseModel()
 model.load_state_dict(torch.load("../models/siamese_model.pth", map_location=torch.device('cpu')))
 model.eval()
 
 
-@app.route("/")
-def hello():
-    return "Hello, World!"
-
-
 @app.route('/analyse', methods=['POST'])
 def analyze():
     """
     Endpoint to analyze uploaded video files.
-    :return:
-        JSON response with analysis results or error message.
+    :return: JSON response with analysis results or error message.
     """
     # Check if the request contains the required files
     if 'sample' not in request.files or 'ref' not in request.files:
@@ -48,9 +44,12 @@ def analyze():
         ref_file.save(ref_path)
 
     try:
-        sample_keypoints = pose_estimator.extract_keypoints(sample_path)
-        ref_keypoints = pose_estimator.extract_keypoints(ref_path)
+        #print statements to debug
+        print(f"Extracting keypoints")
+        sample_keypoints, _ = pose_estimator.extract_keypoints(sample_path, save_name='sample')
+        ref_keypoints, _ = pose_estimator.extract_keypoints(ref_path, save_name='ref')
 
+        print(f"Generating embeddings")
         sample_embedding = pose_embedding.generate_embedding(sample_keypoints)
         ref_embedding = pose_embedding.generate_embedding(ref_keypoints)
 
@@ -63,8 +62,11 @@ def analyze():
 
         return jsonify({
             'similarity_score': similarity_score,
+            'message': 'Comparison successful',
+            'distance': distance
         })
     except Exception as e:
+        print("Error occurred:", traceback.format_exc())
         return jsonify({'error': str(e)}), 500
     finally:
         os.remove(sample_path)
