@@ -56,6 +56,7 @@ class TrainModel:
         pos_dir = os.path.join(self.embedding_dir, 'positive')
         neg_dir = os.path.join(self.embedding_dir, 'negative')
 
+        # List all .npy files in the positive and negative directories
         pos_files = [os.path.join(pos_dir, f) for f in os.listdir(pos_dir) if f.endswith('.npy')]
         neg_files = [os.path.join(neg_dir, f) for f in os.listdir(neg_dir) if f.endswith('.npy')]
 

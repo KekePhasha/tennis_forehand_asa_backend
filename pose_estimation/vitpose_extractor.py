@@ -1,3 +1,4 @@
+import mmpretrain.models
 from mmpose.apis import MMPoseInferencer
 import numpy as np
 import os
@@ -28,6 +29,10 @@ class ViTPoseEstimator:
         :param video_path:
         :param save_name:
         :return: keypoints_array: A numpy array of shape (N, 17, 3) where N is the number of frames.
+        N is the number of frames in the video. (52)
+        17 is the number of keypoints. eye, ear, shoulder, elbow, wrist, hip, knee, ankle, etc.
+        3 corresponds to (x, y, score) for each keypoint. x-coordinate, y-coordinate, and confidence score.
+        e.g. keypoints_array[0] contains keypoints for the first frame - [[x1, y1, score1], [x2, y2, score2], ..., [x17, y17, score17]]
         """
         if save_name is None:
             save_name = os.path.splitext(os.path.basename(video_path))[0]

@@ -30,3 +30,6 @@ class SiameseModel(nn.Module):
         f1 = self.embedding_net(x1)
         f2 = self.embedding_net(x2)
         return f.pairwise_distance(f1, f2)
+
+        #todo
+        # Should I use library like torch.nn.functional.pairwise_distance?, to calculate the distance between two embeddings

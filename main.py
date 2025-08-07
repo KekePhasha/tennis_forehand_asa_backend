@@ -1,15 +1,9 @@
-import os
-import numpy as np
 import torch
 from torch.utils.data import DataLoader
-
-from embedding.pose_embedding import PoseEmbedding
 from training.siamese_dataset import SiamesePoseDataset
 from models.siamese_model import SiameseModel
 from training.loss import ContrastiveLoss
-from pose_estimation.vitpose_extractor import ViTPoseEstimator
 from training.train_model import TrainModel
-from utils.file_utils import FileSaver
 
 if __name__ == '__main__':
     trainer = TrainModel()
@@ -21,6 +15,7 @@ if __name__ == '__main__':
 
     model = SiameseModel()
     loss_fn = ContrastiveLoss()
+    # Adam optimizer - used to optimize the model parameters is this backpropagation step?
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     epochs = 40
@@ -37,63 +32,6 @@ if __name__ == '__main__':
 
     torch.save(model.state_dict(), 'models/siamese_model.pth')
     print("Training completed. Model saved to 'models/siamese_model.pth'")
-
-    # step 2: Generate pose embedding
-    ## -------- Generate pose embedding -------- ##
-    # user1_embedding = poseEmbedding.generate_from_file("dataset/keypoints/user1_video_keypoints.npy")
-    # user2_embedding = poseEmbedding.generate_from_file("dataset/keypoints/user2_video_keypoints.npy")
-    # print("Pose embedding shape:", user1_embedding.shape)
-    # print("Pose embedding shape:", user2_embedding.shape)
-    #
-    # ## Save the embeddings
-    # user1_embedding_path = os.path.join('dataset/embeddings', 'user1_embedding.npy')
-    # user2_embedding_path = os.path.join('dataset/embeddings', 'user2_embedding.npy')
-    # os.makedirs('dataset/embeddings', exist_ok=True)
-    # np.save(user1_embedding_path, user1_embedding)
-    # np.save(user2_embedding_path, user2_embedding)
-    #
-    # pairs = [
-    #     (user1_embedding_path, user2_embedding_path),
-    #     (user1_embedding_path, user1_embedding_path),
-    #     (user2_embedding_path, user2_embedding_path),
-    # ]
-    # labels = [0, 1, 1]  # 1 for similar, 0 for dissimilar
-
-    ## -------- Load the dataset -------- ##
-    # dataset = SiamesePoseDataset(pairs, labels)
-    # print("Dataset length:", len(dataset))
-    # loader = DataLoader(dataset, batch_size=3, shuffle=True, drop_last=True)
-    #
-    # model = SiameseModel()
-    # loss_fn = ContrastiveLoss()
-    # optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    #
-    # epochs = 10
-    # for epoch in range(epochs):
-    #     for i, (emb1, emb2, label) in enumerate(loader):
-    #         optimizer.zero_grad()
-    #         distance = model.forward(emb1, emb2)
-    #         loss = loss_fn(distance, label)
-    #         loss.backward()
-    #         optimizer.step()
-    #
-    #         if i % 10 == 0:
-    #             print(f"Epoch {epoch}, Step {i}, Loss: {loss.item()}")
-    #
-    # torch.save(model.state_dict(), 'models/siamese_model.pth')
-    #
-    # user_1_tensor = torch.from_numpy(user1_embedding).unsqueeze(0).float()
-    # user_2_tensor = torch.from_numpy(user2_embedding).unsqueeze(0).float()
-    #
-    # model.eval()
-    # with torch.no_grad():
-    #     distance = model.forward(user_1_tensor, user_2_tensor).item()
-    #
-    # similarity_score = 1 / (1 + distance)
-    #
-    # print(f"Similarity score: {similarity_score:.2f}")
-
-
 
     ## -------- Display keypoints on a frame -------- ##
     # Open video and go to frame 70
