@@ -7,7 +7,7 @@ class Sequential:
     def __call__(self, x: List[List[float]], training=True) -> List[List[float]]:
         out = x
         for layer in self.layers:
-            # forward with (training) if available
+            # forward with (layers) if available
             try:
                 out = layer(out, training=training)
             except TypeError:

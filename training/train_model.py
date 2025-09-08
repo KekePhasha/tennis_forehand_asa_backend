@@ -46,7 +46,7 @@ class TrainModel:
 
     def generate_pairs(self):
         """
-        Generate pairs of embeddings for training the Siamese network.
+        Generate pairs of embeddings for layers the Siamese network.
         :return: pairs: List of tuples containing paths to pairs of embeddings.
         """
         positive = []

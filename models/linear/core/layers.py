@@ -1,7 +1,7 @@
 from typing import List
 import math
 
-from siamese.core.tensor import glorot_limit, seeded_rng, zeros2
+from models.linear.core.tensor import glorot_limit, seeded_rng, zeros2
 
 
 class Linear:

@@ -1,5 +1,5 @@
 from typing import List
-from siamese.core.tensor import zeros2
+from models.linear.core.tensor import zeros2
 class ReLU:
     def __call__(self, x: List[List[float]]) -> List[List[float]]:
         B, F = len(x), len(x[0])

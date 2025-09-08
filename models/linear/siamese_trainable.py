@@ -1,7 +1,15 @@
+import math
 from typing import List
-from siamese.training.layers import Linear, ReLU, Sequential
-from siamese.training.loss import siamese_contrastive_backward
+from models.linear.layers.layers import Linear, ReLU, Sequential
+from models.linear.layers.loss import siamese_contrastive_backward
 
+
+def l2_normalize_rows(matrix_list: List[List[float]]):
+    normalized = []
+    for row in matrix_list:
+        norm = math.sqrt(sum(v*v for v in row))
+        normalized.append([v / norm for v in row] if norm > 0 else row[:])
+    return normalized
 
 class SiameseModelTrainable:
     """
@@ -9,11 +17,11 @@ class SiameseModelTrainable:
       51 -> 64 -> 32
     """
 
-    def __init__(self, input_dim=51, h=64, embed=32, seed=7):
+    def __init__(self, input_dim=51, hidden_dim=64, embed_dim=32, seed=7):
         self.net = Sequential([
-            Linear(input_dim, h, seed=seed + 1),
+            Linear(input_dim, hidden_dim, seed=seed + 1),
             ReLU(),
-            Linear(h, embed, seed=seed + 2),
+            Linear(hidden_dim, embed_dim, seed=seed + 2),
         ])
 
     def zero_grad(self):
@@ -47,3 +55,13 @@ class SiameseModelTrainable:
         # One optimizer step for shared parameters
         self.step(lr)
         return loss
+
+    def distances(self, left_vectors, right_vectors):
+        left_vectors = l2_normalize_rows(left_vectors)
+        right_vectors = l2_normalize_rows(right_vectors)
+        left_embeddings = self.forward_once(left_vectors)
+        right_embeddings = self.forward_once(right_vectors)
+        dists = []
+        for a, b in zip(left_embeddings, right_embeddings):
+            dists.append(math.sqrt(sum((x - y) * (x - y) for x, y in zip(a, b))))
+        return dists

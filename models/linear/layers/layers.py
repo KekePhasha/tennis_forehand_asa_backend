@@ -2,7 +2,7 @@ import math
 import random
 from typing import List
 
-from siamese.core.tensor import zeros2
+from models.linear.core.tensor import zeros2
 
 
 class Linear:

@@ -1,9 +1,9 @@
 from typing import List
 
-from siamese.core.activation import ReLU
-from siamese.core.container import Sequential
-from siamese.core.distance import pairwise_distance
-from siamese.core.layers import Linear, BatchNorm1d, Dropout
+from models.linear.core.activation import ReLU
+from models.linear.core.container import Sequential
+from models.linear.core.distance import pairwise_distance
+from models.linear.core.layers import Linear, BatchNorm1d, Dropout
 
 
 class SiameseModel:

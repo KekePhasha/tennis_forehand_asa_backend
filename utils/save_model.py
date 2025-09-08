@@ -1,7 +1,8 @@
 # siamese/utils/checkpoint.py
 import json, os
 from typing import Any, Dict
-from siamese.training.layers import Linear, ReLU, Sequential
+from models.linear.layers.layers import Linear
+
 
 def save_model_json(model, path: str, meta: Dict[str, Any] = None):
     """
