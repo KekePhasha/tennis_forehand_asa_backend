@@ -3,7 +3,7 @@ from embedding.pose_embedding import PoseEmbedding
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
 from utils.file_utils import FileSaver
 
-class TrainModel:
+class KeypointExtract:
     def __init__(self,
                  video_root='dataset/VIDEO_RGB/forehand_openstands',
                  keypoint_dir='dataset/keypoints',
@@ -49,9 +49,6 @@ class TrainModel:
         Generate pairs of embeddings for layers the Siamese network.
         :return: pairs: List of tuples containing paths to pairs of embeddings.
         """
-        positive = []
-        negative = []
-
         # Group embeddings
         pos_dir = os.path.join(self.embedding_dir, 'positive')
         neg_dir = os.path.join(self.embedding_dir, 'negative')

@@ -1,13 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models.video import r3d_18, R3D_18_Weights
+from torchvision.models.video import mc3_18, MC3_18_Weights
+
+"""
+https://docs.pytorch.org/vision/main/models/generated/torchvision.models.video.r3d_18.html
+https://arxiv.org/abs/1711.11248
+"""
 
 class R3D18Siamese(nn.Module):
     def __init__(self, embed_dim: int = 128, use_pretrained: bool = True, freeze_backbone: bool = False):
         super(R3D18Siamese, self).__init__()
-        weights = R3D_18_Weights.DEFAULT if use_pretrained else None
-        self.backbone = r3d_18(weights=weights)
+        weights = MC3_18_Weights.DEFAULT if use_pretrained else None
+        self.backbone = mc3_18(weights=weights, progress=True)
         backbone_features = self.backbone.fc.in_features
         self.backbone.fc = nn.Identity()
         self.projection_head = nn.Sequential(

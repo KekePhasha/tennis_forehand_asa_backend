@@ -13,7 +13,7 @@ def l2_normalize_rows(matrix_list: List[List[float]]):
 
 class SiameseModelTrainable:
     """
-    Trainable pure-Python Siamese (no BN/Dropout for simplicity):
+    Linear model with two hidden layers:
       51 -> 64 -> 32
     """
 

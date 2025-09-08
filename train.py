@@ -11,7 +11,7 @@ from training.loops import (
     train_epoch_pure, eval_epoch_pure,
     train_epoch_torch, eval_epoch_torch,
 )
-from training.train_model import TrainModel
+from training.train_model import KeypointExtract
 from training.checkpoints import save_pure_json, save_torch
 # If you use torchvision pretrained transforms for ResNet18:
 # from torchvision.models import ResNet18_Weights
@@ -23,24 +23,33 @@ def main():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--margin", type=float, default=1.0)
+    parser.add_argument("--videos_root", type=str, default="dataset/VIDEO_RGB/forehand_openstands")
     parser.add_argument("--freeze_backbone", action="store_true")
     args = parser.parse_args()
 
     # 1) Build your (pairs, labels) here. For example:
-    trainer = TrainModel()
+    if args.backend == "pure":
+        from training.train_model import KeypointExtract
+        trainer = KeypointExtract()
+        pairs, labels = trainer.generate_pairs()
+        dataset = build_dataset("pure", pair_list=pairs, pair_labels=labels)
+    # elif args.backend == "resnet18":
+    #     # Make image pairs from a classed folder tree
+    #     pairs, labels = make_image_pairs_from_folders(args.images_root)
+    #     # Use transforms that match ResNet18 pretrained weights
+    #     tf = ResNet18_Weights.DEFAULT.transforms()
+    #     dataset = build_dataset("resnet18", pair_list=pairs, pair_labels=labels, image_transform=tf)
+    elif args.backend == "r3d_18":
+        from training.pair_builder import make_video_pairs_from_folders
+        pairs, labels = make_video_pairs_from_folders(args.videos_root)
+        dataset = build_dataset("r3d_18", pair_list=pairs, pair_labels=labels,
+                                clip_length_frames=8, spatial_size=96)
+    else:  # r3d_18
+        # You need a similar pair-builder for videos. Placeholder:
+        # pairs, labels = make_video_pairs_from_folders(args.videos_root)
+        # dataset = build_dataset("r3d_18", pair_list=pairs, pair_labels=labels, clip_length_frames=16, spatial_size=112)
+        raise NotImplementedError("Implement make_video_pairs_from_folders(...) for your videos.")
 
-    # trainer.extract_all_keypoints()
-    # trainer.generate_all_embeddings()
-    pairs, labels = trainer.generate_pairs()   # for keypoints
-
-
-    # For images/videos, build lists of (left_path, right_path) and labels.
-    # raise NotImplementedError("Replace this with your actual (pairs, labels) loading")
-
-    # dataset_kind must match your backend
-    dataset_kind = args.backend
-    # Optional: image_transform = ResNet18_Weights.DEFAULT.transforms()
-    dataset = build_dataset(dataset_kind, pair_list=pairs, pair_labels=labels)
 
     # 2) Split into train/val
     num_val = max(1, int(0.2 * len(dataset)))
@@ -82,3 +91,5 @@ if __name__ == "__main__":
 
 
 #  python train.py --backend pure --epochs 30 --batch_size 128 --lr 5e-4 --margin 1.0
+
+# python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true
