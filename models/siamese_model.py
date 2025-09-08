@@ -1,35 +1,30 @@
-import torch.nn as nn
-import torch.nn.functional as f
+from typing import List
 
-class SiameseModel(nn.Module):
-    """
-    Siamese network model for learning pose embeddings.
-    This model consists of a shared embedding network that processes two input embeddings
-    and outputs the distance between them.
-    """
-    def __init__(self, input_dim=51):
-        super(SiameseModel, self).__init__()
-        self.embedding_net = nn.Sequential(
-            nn.Linear(input_dim, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(128, 64),
-            nn.BatchNorm1d(64),
-            nn.ReLU(),
-            nn.Linear(64, 32)
-        )
+from siamese.core.activation import ReLU
+from siamese.core.container import Sequential
+from siamese.core.distance import pairwise_distance
+from siamese.core.layers import Linear, BatchNorm1d, Dropout
 
-    def forward(self, x1, x2):
-        """
-        Forward pass for the Siamese network.
-        :param x1: First input embedding.
-        :param x2: Second input embedding.
-        :return: Euclidean distance between the two embeddings.
-        """
-        f1 = self.embedding_net(x1)
-        f2 = self.embedding_net(x2)
-        return f.pairwise_distance(f1, f2)
 
-        #todo
-        # Should I use library like torch.nn.functional.pairwise_distance?, to calculate the distance between two embeddings
+class SiameseModel:
+    def __init__(self, input_dim=51, training=True, seed=7,
+                 h1=128, h2=64, embed=32, pdrop=0.2):
+        self.training = training
+        self.embedding_net = Sequential([
+            Linear(input_dim, h1, seed=seed+1),
+            BatchNorm1d(h1),
+            ReLU(),
+            Dropout(pdrop, seed=seed+2),
+            Linear(h1, h2, seed=seed+3),
+            BatchNorm1d(h2),
+            ReLU(),
+            Linear(h2, embed, seed=seed+4)
+        ])
+
+    def forward_once(self, x: List[List[float]]):
+        return self.embedding_net(x, training=self.training)
+
+    def forward(self, x1: List[List[float]], x2: List[List[float]]):
+        f1 = self.forward_once(x1)
+        f2 = self.forward_once(x2)
+        return pairwise_distance(f1, f2)

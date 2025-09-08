@@ -31,7 +31,7 @@ class SiamesePoseDataset(Dataset):
         :return:  Tuple containing the two embeddings and their label. (emb1, emb2, label)
         """
         path1, path2 = self.pairs[idx]
-        emb1 = np.load(path1).astype(np.float32)
-        emb2 = np.load(path2).astype(np.float32)
-        label = np.float32(self.labels[idx])
+        emb1 = np.load(path1).astype(np.float32).reshape(-1)  # -> shape (51,)
+        emb2 = np.load(path2).astype(np.float32).reshape(-1)  # -> shape (51,)
+        label = np.float32(self.labels[idx])  # 0.0 or 1.0
         return emb1, emb2, label
