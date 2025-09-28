@@ -1,14 +1,27 @@
+import json
+import math
+import warnings
+from pathlib import Path
+
+# Generic: silence that urllib3 LibreSSL warning
+warnings.filterwarnings("ignore", category=Warning, module=r"urllib3(\.|$)")
+# Specific: silence the pkg_resources deprecation warning
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+
 import os
 import tempfile
 import traceback
 
+import numpy as np
 import torch
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from embedding.pose_embedding import PoseEmbedding
+from models import SiameseModelTrainable
 from models.siamese_model import SiameseModel
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
+from training.checkpoints import load_pure_json
 from utils.file_utils import FileSaver
 
 app = Flask(__name__)
@@ -16,9 +29,49 @@ CORS(app, origins=["http://localhost:3000"])
 
 pose_estimator = ViTPoseEstimator(FileSaver())
 pose_embedding = PoseEmbedding(confidence_threshold=0.6)
-model = SiameseModel()
-model.load_state_dict(torch.load("../models/siamese_model.pth", map_location=torch.device('cpu')))
-model.eval()
+
+CKPT_PATH = (
+    Path(__file__).resolve()           # .../webapp/app.py
+    .parent                            # .../webapp
+    .parent / "checkpoints" / "pure_siamese.json"   # .. / checkpoints / pure_siamese.json
+).resolve()
+
+CALIB_PATH = (
+    Path(__file__).resolve()
+    .parent
+    .parent / "checkpoints" / "pure_siamese_calibration.json"
+).resolve()
+
+if not CKPT_PATH.exists():
+    raise FileNotFoundError(f"Checkpoint not found at {CKPT_PATH}")
+
+pure_model = SiameseModelTrainable(input_dim=51, hidden_dim=64, embed_dim=32, seed=7)
+load_pure_json(pure_model, str(CKPT_PATH))
+
+if CALIB_PATH.exists():
+    with open(CALIB_PATH, "r") as f:
+        _cal = json.load(f)
+    TAU = float(_cal.get("tau", 1.0))
+    SCALE = float(_cal.get("scale", 0.1))
+else:
+    TAU, SCALE = 1.0, 0.1  # fallback; consider logging a warning
+
+def prob_similar(distance: float, tau: float = None, scale: float = None) -> float:
+    """Convert an L2 distance to calibrated probability of 'similar'."""
+    tau = TAU if tau is None else tau
+    scale = SCALE if scale is None else scale
+    z = (tau - float(distance)) / max(1e-6, float(scale))
+    return 1.0 / (1.0 + math.exp(-z))
+
+def _to_list51(vec: np.ndarray) -> list[list[float]]:
+    """Ensure 1x51 float list-of-lists for the pure model API."""
+    v = np.asarray(vec, dtype=np.float32).reshape(1, -1)
+    if v.shape[1] != 51:
+        raise ValueError(f"Expected 51-dim embedding, got {v.shape[1]}")
+    # (optional) L2-normalize like training
+    n = np.linalg.norm(v, axis=1, keepdims=True)
+    v = np.divide(v, np.maximum(n, 1e-12))
+    return v.tolist()
 
 
 @app.route('/analyse', methods=['POST'])
@@ -45,25 +98,29 @@ def analyze():
 
     try:
         #print statements to debug
-        print(f"Extracting keypoints")
+        print("Extracting keypoints")
         sample_keypoints, _ = pose_estimator.extract_keypoints(sample_path, save_name='sample')
         ref_keypoints, _ = pose_estimator.extract_keypoints(ref_path, save_name='ref')
 
-        print(f"Generating embeddings")
-        sample_embedding = pose_embedding.generate_embedding(sample_keypoints)
-        ref_embedding = pose_embedding.generate_embedding(ref_keypoints)
+        print("Generating embeddings")
+        sample_embed = pose_embedding.generate_embedding(sample_keypoints)
+        ref_embed = pose_embedding.generate_embedding(ref_keypoints)
 
-        sample_tensor = torch.from_numpy(sample_embedding).unsqueeze(0).float()
-        ref_tensor = torch.from_numpy(ref_embedding).unsqueeze(0).float()
 
-        with torch.no_grad():
-            distance = model.forward(sample_tensor, ref_tensor).item()
-            similarity_score = 1 / (1 + distance)
+        left = _to_list51(sample_embed)
+        right = _to_list51(ref_embed)
+        distance = pure_model.distances(left, right)[0]
+
+        # similarity_score = 1.0 / (1.0 + float(distance))
+
+        similarity_score = prob_similar(distance)  # 0..1
+        is_similar = bool(distance < TAU)
 
         return jsonify({
             'similarity_score': similarity_score,
             'message': 'Comparison successful',
-            'distance': distance
+            'is_similar': is_similar,
+            'distance': float(distance)
         })
     except Exception as e:
         print("Error occurred:", traceback.format_exc())

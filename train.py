@@ -67,7 +67,53 @@ def main():
             train_loss = train_epoch_pure(model, loader_train, learning_rate=args.lr, margin=args.margin)
             val_acc    = eval_epoch_pure(model, loader_val, margin=args.margin)
             print(f"epoch {epoch_index:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
+        import numpy as np, os, json
+
+        def _collect_val_dists_labels_pure(model, loader):
+            D, Y = [], []
+            for left_vec, right_vec, label_tensor in loader:
+                L = left_vec.numpy().astype(float).tolist()
+                R = right_vec.numpy().astype(float).tolist()
+                d = model.distances(L, R)  # List[float]
+                D.extend(d)
+                Y.extend(label_tensor.numpy().astype(int).tolist())
+            return np.array(D, float), np.array(Y, int)
+
+        def _choose_best_tau(dist, lab, steps=200):
+            if len(dist) == 0:
+                return 1.0, 0.0
+            lo = float(np.percentile(dist, 2))
+            hi = float(np.percentile(dist, 98))
+            best_tau, best_acc = 1.0, 0.0
+            for i in range(steps):
+                tau = lo + i * (hi - lo) / max(1, steps - 1)
+                pred_sim = dist < tau
+                acc = float(np.mean((lab == 0) == pred_sim))
+                if acc > best_acc:
+                    best_tau, best_acc = tau, acc
+            return best_tau, best_acc
+
+        def estimate_scale(dist, lab, tau):
+            pos = dist[lab == 0];
+            neg = dist[lab == 1]
+            if len(pos) == 0 or len(neg) == 0:
+                return 0.1
+            p5, n95 = np.percentile(pos, 5), np.percentile(neg, 95)
+            width = max(1e-6, n95 - p5)
+            return float(width / 6.0)
+
+        # compute distances on VAL, pick τ and scale, save both files
+        dist, lab = _collect_val_dists_labels_pure(model, loader_val)
+        tau, best_acc = _choose_best_tau(dist, lab, steps=200)
+        scale = estimate_scale(dist, lab, tau)
+        print(f"[calibration] best τ={tau:.4f} (val_acc={best_acc:.4f}), scale={scale:.4f}")
+
+        os.makedirs("checkpoints", exist_ok=True)
+        from training.checkpoints import save_pure_json
         save_pure_json(model, "checkpoints/pure_siamese.json")
+        with open("checkpoints/pure_siamese_calibration.json", "w") as f:
+            json.dump({"tau": float(tau), "scale": float(scale)}, f, indent=2)
+        print("[saved] checkpoints/pure_siamese.json + pure_siamese_calibration.json")
 
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"

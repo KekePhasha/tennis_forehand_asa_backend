@@ -1,4 +1,6 @@
 import os
+import random
+
 from embedding.pose_embedding import PoseEmbedding
 from pose_estimation.vitpose_extractor import ViTPoseEstimator
 from utils.file_utils import FileSaver
@@ -44,38 +46,46 @@ class KeypointExtract:
                     embedding = self.embedder.generate_from_file(kp_path)
                     self.file_saver.save_embedding(kp_path, embedding)
 
-    def generate_pairs(self):
-        """
-        Generate pairs of embeddings for layers the Siamese network.
-        :return: pairs: List of tuples containing paths to pairs of embeddings.
-        """
-        # Group embeddings
+    import random
+
+    def generate_pairs(self, max_pos_pairs_per_class: int = 10_000):
         pos_dir = os.path.join(self.embedding_dir, 'positive')
         neg_dir = os.path.join(self.embedding_dir, 'negative')
 
-        # List all .npy files in the positive and negative directories
         pos_files = [os.path.join(pos_dir, f) for f in os.listdir(pos_dir) if f.endswith('.npy')]
         neg_files = [os.path.join(neg_dir, f) for f in os.listdir(neg_dir) if f.endswith('.npy')]
 
-        pairs = []
-        labels = []
+        pairs_sim, pairs_dis = [], []
 
-        # Positive pairs (same class)
-        for i in range(len(pos_files)):
-            for j in range(i + 1, len(pos_files)):
-                pairs.append((pos_files[i], pos_files[j]))
-                labels.append(1)
+        # similar (same-class) -> 0
+        def add_similar(files):
+            files = files[:]
+            random.shuffle(files)
+            count = 0
+            for i in range(len(files)):
+                for j in range(i + 1, len(files)):
+                    pairs_sim.append((files[i], files[j]))
+                    count += 1
+                    if count >= max_pos_pairs_per_class:
+                        return
 
-        for i in range(len(neg_files)):
-            for j in range(i + 1, len(neg_files)):
-                pairs.append((neg_files[i], neg_files[j]))
-                labels.append(1)
+        add_similar(pos_files)
+        add_similar(neg_files)
 
-        # Negative pairs (different classes)
-        for pf in pos_files:
-            for nf in neg_files:
-                pairs.append((pf, nf))
-                labels.append(0)
+        # dissimilar (cross-class) -> 1 (balanced to same count)
+        target = len(pairs_sim)
+        while len(pairs_dis) < target and pos_files and neg_files:
+            pf = random.choice(pos_files)
+            nf = random.choice(neg_files)
+            pairs_dis.append((pf, nf))
 
+        pairs = pairs_sim + pairs_dis
+        labels = [0] * len(pairs_sim) + [1] * len(pairs_dis)
+
+        # shuffle
+        idx = list(range(len(pairs)))
+        random.shuffle(idx)
+        pairs = [pairs[i] for i in idx]
+        labels = [labels[i] for i in idx]
         return pairs, labels
 
