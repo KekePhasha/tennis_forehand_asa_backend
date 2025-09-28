@@ -1,4 +1,11 @@
+import json
+import os
 import warnings
+
+import numpy as np
+from matplotlib import pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
 # Generic: silence that urllib3 LibreSSL warning
 warnings.filterwarnings("ignore", category=Warning, module=r"urllib3(\.|$)")
 # Specific: silence the pkg_resources deprecation warning
@@ -16,18 +23,101 @@ from training.checkpoints import save_pure_json, save_torch
 # If you use torchvision pretrained transforms for ResNet18:
 # from torchvision.models import ResNet18_Weights
 
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def collect_val_dists_labels_pure(model, loader):
+    D, Y = [], []
+    for left_vec, right_vec, label_tensor in loader:
+        L = left_vec.numpy().astype(float).tolist()
+        R = right_vec.numpy().astype(float).tolist()
+        d = model.distances(L, R)  # List[float]
+        D.extend(d)
+        Y.extend(label_tensor.numpy().astype(int).tolist())
+    return np.array(D, float), np.array(Y, int)
+
+
+def choose_best_tau(dist, lab, steps=200):
+    if len(dist) == 0:
+        return 1.0, 0.0
+    lo, hi = float(np.percentile(dist, 2)), float(np.percentile(dist, 98))
+    best_tau, best_acc = 1.0, 0.0
+    for i in range(steps):
+        tau = lo + i * (hi - lo) / max(1, steps - 1)
+        pred_sim = dist < tau
+        acc = float(np.mean((lab == 0) == pred_sim))
+        if acc > best_acc:
+            best_tau, best_acc = tau, acc
+    return best_tau, best_acc
+
+
+def estimate_scale(dist, lab, tau):
+    pos = dist[lab == 0]
+    neg = dist[lab == 1]
+    if len(pos) == 0 or len(neg) == 0:
+        return 0.1
+    p5, n95 = np.percentile(pos, 5), np.percentile(neg, 95)
+    width = max(1e-6, n95 - p5)
+    return float(width / 6.0)
+
+
+def plot_training_curves(train_losses, val_accs, save_dir="results"):
+    os.makedirs(save_dir, exist_ok=True)
+    plt.figure()
+    plt.plot(train_losses, label="Train Loss")
+    plt.plot(val_accs, label="Val Acc (τ=margin)")
+    plt.xlabel("Epoch")
+    plt.ylabel("Value")
+    plt.legend()
+    plt.title("Training Curves")
+    plt.savefig(os.path.join(save_dir, "training_curves.png"))
+    plt.close()
+
+
+def plot_distances(dist, lab, tau, save_dir="results"):
+    os.makedirs(save_dir, exist_ok=True)
+    plt.figure()
+    plt.hist(dist[lab == 0], bins=50, alpha=0.5, label="Positives")
+    plt.hist(dist[lab == 1], bins=50, alpha=0.5, label="Negatives")
+    plt.axvline(tau, color="red", linestyle="--", label=f"τ={tau:.2f}")
+    plt.legend()
+    plt.title("Distance Distributions")
+    plt.savefig(os.path.join(save_dir, "distances.png"))
+    plt.close()
+
+
+def plot_roc(dist, lab, save_dir="results"):
+    os.makedirs(save_dir, exist_ok=True)
+    fpr, tpr, _ = roc_curve(lab, -dist)  # smaller distance = positive
+    roc_auc = auc(fpr, tpr)
+    plt.figure()
+    plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.2f}")
+    plt.plot([0, 1], [0, 1], linestyle="--", color="gray")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve")
+    plt.legend()
+    plt.savefig(os.path.join(save_dir, "roc.png"))
+    plt.close()
+
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=["pure", "resnet18", "r3d_18"], required=True)
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch_size", type=int, default=128)
-    parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--margin", type=float, default=1.0)
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs to train for")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+    parser.add_argument("--margin", type=float, default=1.0, help="Contrastive loss margin")
     parser.add_argument("--videos_root", type=str, default="dataset/VIDEO_RGB/forehand_openstands")
     parser.add_argument("--freeze_backbone", action="store_true")
+    parser.add_argument("--embed_dim", type=int, default=32, help="Embedding dimension")
+    parser.add_argument("--use_bn", action="store_true", help="Use BatchNorm layers")
+    parser.add_argument("--use_dropout", action="store_true", help="Use Dropout layers")
     args = parser.parse_args()
 
-    # 1) Build your (pairs, labels) here. For example:
+    # 1) Create a dataset of pairs
     if args.backend == "pure":
         from training.train_model import KeypointExtract
         trainer = KeypointExtract()
@@ -44,11 +134,8 @@ def main():
         pairs, labels = make_video_pairs_from_folders(args.videos_root)
         dataset = build_dataset("r3d_18", pair_list=pairs, pair_labels=labels,
                                 clip_length_frames=8, spatial_size=96)
-    else:  # r3d_18
-        # You need a similar pair-builder for videos. Placeholder:
-        # pairs, labels = make_video_pairs_from_folders(args.videos_root)
-        # dataset = build_dataset("r3d_18", pair_list=pairs, pair_labels=labels, clip_length_frames=16, spatial_size=112)
-        raise NotImplementedError("Implement make_video_pairs_from_folders(...) for your videos.")
+    else:
+        raise NotImplementedError("backend must be one of: pure, resnet18, r3d_18")
 
 
     # 2) Split into train/val
@@ -62,59 +149,33 @@ def main():
 
     # 3) Create and train the model
     if args.backend == "pure":
-        model = create_model("pure", input_dim=51, hidden_dim=64, embed_dim=32, seed=7)
-        for epoch_index in range(1, args.epochs + 1):
+        model = create_model("pure", input_dim=51, hidden_dim=128, embed_dim=args.embed_dim, seed=7,  use_bn=args.use_bn,
+        use_dropout=args.use_dropout)
+        train_losses, val_accs = [], []
+        for epoch in range(1, args.epochs + 1):
             train_loss = train_epoch_pure(model, loader_train, learning_rate=args.lr, margin=args.margin)
             val_acc    = eval_epoch_pure(model, loader_val, margin=args.margin)
-            print(f"epoch {epoch_index:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
-        import numpy as np, os, json
+            print(f"epoch {epoch:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
+            train_losses.append(train_loss)
+            val_accs.append(val_acc)
 
-        def _collect_val_dists_labels_pure(model, loader):
-            D, Y = [], []
-            for left_vec, right_vec, label_tensor in loader:
-                L = left_vec.numpy().astype(float).tolist()
-                R = right_vec.numpy().astype(float).tolist()
-                d = model.distances(L, R)  # List[float]
-                D.extend(d)
-                Y.extend(label_tensor.numpy().astype(int).tolist())
-            return np.array(D, float), np.array(Y, int)
-
-        def _choose_best_tau(dist, lab, steps=200):
-            if len(dist) == 0:
-                return 1.0, 0.0
-            lo = float(np.percentile(dist, 2))
-            hi = float(np.percentile(dist, 98))
-            best_tau, best_acc = 1.0, 0.0
-            for i in range(steps):
-                tau = lo + i * (hi - lo) / max(1, steps - 1)
-                pred_sim = dist < tau
-                acc = float(np.mean((lab == 0) == pred_sim))
-                if acc > best_acc:
-                    best_tau, best_acc = tau, acc
-            return best_tau, best_acc
-
-        def estimate_scale(dist, lab, tau):
-            pos = dist[lab == 0];
-            neg = dist[lab == 1]
-            if len(pos) == 0 or len(neg) == 0:
-                return 0.1
-            p5, n95 = np.percentile(pos, 5), np.percentile(neg, 95)
-            width = max(1e-6, n95 - p5)
-            return float(width / 6.0)
-
-        # compute distances on VAL, pick τ and scale, save both files
-        dist, lab = _collect_val_dists_labels_pure(model, loader_val)
-        tau, best_acc = _choose_best_tau(dist, lab, steps=200)
+        # Calibration
+        dist, lab = collect_val_dists_labels_pure(model, loader_val)
+        tau, best_acc = choose_best_tau(dist, lab, steps=200)
         scale = estimate_scale(dist, lab, tau)
         print(f"[calibration] best τ={tau:.4f} (val_acc={best_acc:.4f}), scale={scale:.4f}")
 
+        # Save
         os.makedirs("checkpoints", exist_ok=True)
-        from training.checkpoints import save_pure_json
         save_pure_json(model, "checkpoints/pure_siamese.json")
         with open("checkpoints/pure_siamese_calibration.json", "w") as f:
             json.dump({"tau": float(tau), "scale": float(scale)}, f, indent=2)
-        print("[saved] checkpoints/pure_siamese.json + pure_siamese_calibration.json")
 
+        # Plots
+        save_dir = os.path.join("results", args.backend)
+        plot_training_curves(train_losses, val_accs, save_dir)
+        plot_distances(dist, lab, tau, save_dir)
+        plot_roc(dist, lab, save_dir)
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if args.backend == "resnet18":
@@ -136,6 +197,6 @@ if __name__ == "__main__":
     main()
 
 
-#  python train.py --backend pure --epochs 30 --batch_size 128 --lr 5e-4 --margin 1.0
+#  python train.py --backend pure --epochs 30 --batch_size 32 --lr 5e-4 --margin 1.0
 
 # python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true

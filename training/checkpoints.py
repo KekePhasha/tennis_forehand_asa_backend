@@ -1,4 +1,7 @@
 import os, json, torch
+
+import numpy as np
+
 from models.linear.layers.layers import Linear
 
 
@@ -14,12 +17,20 @@ def save_pure_json(model, json_path: str):
     with open(json_path, "w") as f:
         json.dump(dump, f)
 
-def load_pure_json(model, json_path: str):
-    with open(json_path) as f:
-        obj = json.load(f)
-    for layer, saved in zip(model.net.layers, obj["layers"]):
-        if isinstance(layer, Linear) and saved["type"] == "Linear":
-            layer.W = saved["W"]; layer.b = saved["b"]
+def load_pure_json(model, path):
+    with open(path, "r") as f:
+        state = json.load(f)
+
+    # Go through layers in order
+    for layer, layer_state in zip(model.net.layers, state["layers"]):
+        if hasattr(layer, "W") and "W" in layer_state:
+            layer.W = np.array(layer_state["W"], dtype=float).tolist()
+        if hasattr(layer, "b") and "b" in layer_state:
+            layer.b = np.array(layer_state["b"], dtype=float).tolist()
+        if hasattr(layer, "gamma") and "gamma" in layer_state:
+            layer.gamma = np.array(layer_state["gamma"], dtype=float).tolist()
+        if hasattr(layer, "beta") and "beta" in layer_state:
+            layer.beta = np.array(layer_state["beta"], dtype=float).tolist()
 
 # Torch models: .pth
 def save_torch(model, pth_path: str):

@@ -45,8 +45,13 @@ CALIB_PATH = (
 if not CKPT_PATH.exists():
     raise FileNotFoundError(f"Checkpoint not found at {CKPT_PATH}")
 
-pure_model = SiameseModelTrainable(input_dim=51, hidden_dim=64, embed_dim=32, seed=7)
+pure_model = SiameseModelTrainable(input_dim=51, hidden_dim=128, embed_dim=32, seed=7)
 load_pure_json(pure_model, str(CKPT_PATH))
+print("First linear W:", pure_model.net.layers[0].W[0][:5])
+print("First linear b:", pure_model.net.layers[0].b[:5])
+
+print("Second linear W:", pure_model.net.layers[4].W[0][:5])
+print("Second linear b:", pure_model.net.layers[4].b[:5])
 
 if CALIB_PATH.exists():
     with open(CALIB_PATH, "r") as f:
@@ -109,7 +114,13 @@ def analyze():
 
         left = _to_list51(sample_embed)
         right = _to_list51(ref_embed)
-        distance = pure_model.distances(left, right)[0]
+        distance = pure_model.distances(left, right, train=False)[0]
+
+        print("Sample embed (raw):", sample_embed[:10])  # first 10 values
+        print("Ref embed (raw):", ref_embed[:10])
+        print("Left forward:", pure_model.forward_once(left)[0][:10])
+        print("Right forward:", pure_model.forward_once(right)[0][:10])
+        print("Distance:", distance)
 
         # similarity_score = 1.0 / (1.0 + float(distance))
 

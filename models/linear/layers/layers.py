@@ -1,6 +1,6 @@
 import math
 import random
-from typing import List
+from typing import List, Any
 
 from models.linear.core.tensor import zeros2
 
@@ -113,7 +113,7 @@ class ReLU:
         pass  # no params
 
 class Sequential:
-    def __init__(self, layers):
+    def __init__(self, layers: List[Any]):
         self.layers = layers
         self.cache_inputs = []  # optional, not used here
 
@@ -122,10 +122,13 @@ class Sequential:
             if hasattr(layer, "zero_grad"):
                 layer.zero_grad()
 
-    def forward(self, x: List[List[float]]) -> List[List[float]]:
+    def forward(self, x, train=True):
         out = x
         for layer in self.layers:
-            out = layer.forward(out)
+            if hasattr(layer, "forward"):
+                out = layer.forward(out,
+                                    train=train) if "train" in layer.forward.__code__.co_varnames else layer.forward(
+                    out)
         return out
 
     def backward(self, dOut: List[List[float]]) -> List[List[float]]:

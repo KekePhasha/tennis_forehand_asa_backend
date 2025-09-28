@@ -48,7 +48,7 @@ class KeypointExtract:
 
     import random
 
-    def generate_pairs(self, max_pos_pairs_per_class: int = 10_000):
+    def generate_pairs(self, max_pos_pairs_per_class: int = 1000):
         pos_dir = os.path.join(self.embedding_dir, 'positive')
         neg_dir = os.path.join(self.embedding_dir, 'negative')
 

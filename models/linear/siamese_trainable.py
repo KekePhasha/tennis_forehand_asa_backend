@@ -1,5 +1,8 @@
 import math
 from typing import List
+
+from models.linear.layers.batchnorm import BatchNorm1d
+from models.linear.layers.dropout import Dropout
 from models.linear.layers.layers import Linear, ReLU, Sequential
 from models.linear.layers.loss import siamese_contrastive_backward
 
@@ -13,22 +16,40 @@ def l2_normalize_rows(matrix_list: List[List[float]]):
 
 class SiameseModelTrainable:
     """
-    Linear model with two hidden layers:
-      51 -> 64 -> 32
+    Linear model with three hidden layers:
+    Input (51) → Linear(128) → BN → ReLU → Dropout
+           → Linear(64) → BN → ReLU → Dropout
+           → Linear(32) → Embedding
+    Each hidden layer has BatchNorm, ReLU, Dropout(0.3).
+    The final layer is linear, no activation.
     """
 
-    def __init__(self, input_dim=51, hidden_dim=64, embed_dim=32, seed=7):
-        self.net = Sequential([
+    def __init__(self, input_dim=51, hidden_dim=128, embed_dim=32, seed=7,
+                 use_bn=False, use_dropout=False):
+
+        layers = [
             Linear(input_dim, hidden_dim, seed=seed + 1),
-            ReLU(),
-            Linear(hidden_dim, embed_dim, seed=seed + 2),
-        ])
+        ]
+        if use_bn: layers.append(BatchNorm1d(hidden_dim))
+        layers.append(ReLU())
+        if use_dropout: layers.append(Dropout(p=0.3))
+
+        layers.append(Linear(hidden_dim, 64, seed=seed + 2))
+        if use_bn: layers.append(BatchNorm1d(64))
+        layers.append(ReLU())
+        if use_dropout: layers.append(Dropout(p=0.3))
+
+        layers.append(Linear(64, embed_dim, seed=seed + 3))
+
+        self.net = Sequential(layers)
+
+
 
     def zero_grad(self):
         self.net.zero_grad()
 
-    def forward_once(self, x: List[List[float]]):
-        return self.net.forward(x)  # caches are inside layers
+    def forward_once(self, x: List[List[float]], train=True):
+        return self.net.forward(x, train=train) # caches are inside layers
 
     def backward_once(self, d_embed: List[List[float]]):
         return self.net.backward(d_embed)
@@ -56,11 +77,18 @@ class SiameseModelTrainable:
         self.step(lr)
         return loss
 
-    def distances(self, left_vectors, right_vectors):
+    def distances(self, left_vectors, right_vectors, train=False):
+        """
+        Distances between pairs of embeddings.
+        :param train:
+        :param left_vectors:
+        :param right_vectors:
+        :return:
+        """
         left_vectors = l2_normalize_rows(left_vectors)
         right_vectors = l2_normalize_rows(right_vectors)
-        left_embeddings = self.forward_once(left_vectors)
-        right_embeddings = self.forward_once(right_vectors)
+        left_embeddings = self.forward_once(left_vectors, train=train)
+        right_embeddings = self.forward_once(right_vectors, train=train)
         dists = []
         for a, b in zip(left_embeddings, right_embeddings):
             dists.append(math.sqrt(sum((x - y) * (x - y) for x, y in zip(a, b))))
