@@ -31,3 +31,17 @@ pip install -r requirements.txt
 ### Resources
 - VitPose -  https://mmpose.readthedocs.io/en/latest/user_guides/inference.html
 -  torch.nn - https://docs.pytorch.org/docs/stable/nn.html
+
+
+python train.py \
+    --backend pure \
+    --epochs 50 \
+    --batch_size 32 \
+    --lr 5e-4 \
+    --margin 1.5 \
+    --embed_dim 64 \
+    --use_bn \
+    --use_dropout
+
+
+python train.py --backend pure --epochs 50 --batch_size 32 --lr 5e-4 --margin 0.5 --embed_dim 64

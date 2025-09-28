@@ -61,6 +61,19 @@ def estimate_scale(dist, lab, tau):
     width = max(1e-6, n95 - p5)
     return float(width / 6.0)
 
+def pick_tau_for_fpr(dist, lab, target_fpr=0.05):
+    """
+    Pick τ such that at most target_fpr of negatives (lab=1) fall below τ.
+    lab: 0=positive (similar), 1=negative (dissimilar)
+    """
+    neg = dist[lab == 1]
+    if len(neg) == 0:
+        return 1.0  # fallback if no negatives
+    neg_sorted = np.sort(neg)
+    idx = int(np.floor(target_fpr * len(neg_sorted)))
+    idx = max(0, min(len(neg_sorted)-1, idx))
+    return float(neg_sorted[idx])
+
 
 def plot_training_curves(train_losses, val_accs, save_dir="results"):
     os.makedirs(save_dir, exist_ok=True)
@@ -162,8 +175,18 @@ def main():
         # Calibration
         dist, lab = collect_val_dists_labels_pure(model, loader_val)
         tau, best_acc = choose_best_tau(dist, lab, steps=200)
+        tau_acc, best_acc = choose_best_tau(dist, lab, steps=200)
+        print(f"[calibration-acc] τ={tau_acc:.4f} (val_acc={best_acc:.4f})")
+
+        # 2) Stricter τ for 5% false positive rate
+        tau_fpr = pick_tau_for_fpr(dist, lab, target_fpr=0.05)
+        print(f"[calibration-fpr] τ={tau_fpr:.4f} (≈5% FPR)")
+
+        # Keep the stricter one if you prefer
+        tau = tau_fpr
+
         scale = estimate_scale(dist, lab, tau)
-        print(f"[calibration] best τ={tau:.4f} (val_acc={best_acc:.4f}), scale={scale:.4f}")
+        print(f"[final calibration] τ={tau:.4f}, scale={scale:.4f}")
 
         # Save
         os.makedirs("checkpoints", exist_ok=True)
@@ -200,3 +223,14 @@ if __name__ == "__main__":
 #  python train.py --backend pure --epochs 30 --batch_size 32 --lr 5e-4 --margin 1.0
 
 # python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true
+
+
+# python train.py \
+#   --backend pure \
+#   --epochs 50 \
+#   --batch_size 32 \
+#   --lr 5e-4 \
+#   --margin 1.5 \
+#   --embed_dim 64 \
+#   --use_bn \
+#   --use_dropout
