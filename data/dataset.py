@@ -1,4 +1,3 @@
-# data/datasets.py
 from __future__ import annotations
 from typing import Optional, Callable, Union, List, Tuple
 import random
@@ -168,8 +167,111 @@ class VideoPairDataset(Dataset):
 
         return left_clip, right_clip, label_tensor
 
+class PoseSeqPairDataset(Dataset):
+    """
+    Pairs of pose SEQUENCES for the Pose+Body-Part Attention backbone.
+    Returns:
+      x1: FloatTensor[T, J, 3], x2: FloatTensor[T, J, 3], y: LongTensor[()]
+    """
+    def __init__(
+        self,
+        pair_list: PairList,
+        pair_labels: LabelList,
+        fixed_T: int = 24,
+        J: int = 17,
+        random_crop: bool = True,
+        min_conf: float = 1.0,  # use 1.0 if you don't have confidences
+    ):
+        self.pairs = pair_list
+        self.labels = pair_labels
+        self.fixed_T = fixed_T
+        self.J = J
+        self.random_crop = random_crop
+        self.min_conf = float(min_conf)
 
-DatasetLike = Union[KeypointsPairDataset, ImagePairDataset, VideoPairDataset]
+    def __len__(self) -> int:
+        return len(self.pairs)
+
+    # ---- helpers ----
+    def _load_any(self, src: ArrayLike) -> np.ndarray:
+        if isinstance(src, str):
+            arr = np.load(src, allow_pickle=False)
+        elif isinstance(src, torch.Tensor):
+            arr = src.detach().cpu().numpy()
+        else:
+            arr = np.asarray(src)
+        return arr
+
+    def _canon_shape_TJC(self, arr: np.ndarray) -> np.ndarray:
+        """
+        Convert to (T, J, 3) where last channel is (x, y, conf).
+        Accepted inputs:
+          - (T, J, 3)               -> as-is
+          - (T, J, 2)               -> add conf=1.0 (or min_conf)
+          - (T, J*3) e.g. (T, 51)   -> reshape to (T, J, 3)
+          - (J*3,) e.g. (51,)       -> (1, J, 3)
+        """
+        if arr.ndim == 3 and arr.shape[-1] in (2, 3):
+            T, J, C = arr.shape
+            assert J == self.J, f"Expected J={self.J}, got {J}"
+            if C == 2:
+                conf = np.full((T, J, 1), self.min_conf, dtype=arr.dtype)
+                arr = np.concatenate([arr, conf], axis=-1)  # (T,J,3)
+            return arr.astype(np.float32)
+
+        if arr.ndim == 2 and arr.shape[-1] == self.J * 3:
+            T = arr.shape[0]
+            return arr.reshape(T, self.J, 3).astype(np.float32)
+
+        if arr.ndim == 1 and arr.size == self.J * 3:
+            return arr.reshape(1, self.J, 3).astype(np.float32)
+
+        raise ValueError(f"Unsupported pose array shape {arr.shape}; "
+                         f"expected (T,{self.J},3|2) or (T,{self.J*3}) or ({self.J*3},).")
+
+    def _crop_or_pad_T(self, seq: np.ndarray) -> np.ndarray:
+        """
+        Make temporal length exactly fixed_T:
+          - If longer: center-crop or random-crop (if random_crop=True)
+          - If shorter: pad by repeating last frame
+        """
+        T = seq.shape[0]
+        if T == self.fixed_T:
+            return seq
+        if T > self.fixed_T:
+            if self.random_crop:
+                max_off = T - self.fixed_T
+                start = np.random.randint(0, max_off + 1)
+            else:
+                start = (T - self.fixed_T) // 2
+            return seq[start:start + self.fixed_T]
+        # T < fixed_T: pad last frame
+        pad_frames = self.fixed_T - T
+        pad = np.repeat(seq[-1:], pad_frames, axis=0)
+        return np.concatenate([seq, pad], axis=0)
+
+    # ---- main ----
+    def __getitem__(self, idx: int):
+        s1, s2 = self.pairs[idx]
+        y = int(self.labels[idx])
+
+        a1 = self._load_any(s1)
+        a2 = self._load_any(s2)
+
+        a1 = self._canon_shape_TJC(a1)
+        a2 = self._canon_shape_TJC(a2)
+
+        a1 = self._crop_or_pad_T(a1)
+        a2 = self._crop_or_pad_T(a2)
+
+        x1 = torch.from_numpy(a1)  # (T,J,3)
+        x2 = torch.from_numpy(a2)  # (T,J,3)
+        y  = torch.tensor(y, dtype=torch.long)
+
+        return x1, x2, y
+
+
+DatasetLike = Union[KeypointsPairDataset, ImagePairDataset, VideoPairDataset, PoseSeqPairDataset]
 # ---------------------------------
 # Optional factory for convenience
 # ---------------------------------
@@ -180,7 +282,7 @@ def build_dataset(
     **dataset_kwargs,
 ) -> DatasetLike:
     """
-    dataset_kind: "pure" | "resnet18" | "r3d_18"
+    dataset_kind: "pure" | "resnet18" | "r3d_18" | "pose_attn"
     dataset_kwargs forwarded to constructors.
     """
     kind = dataset_kind.lower()
@@ -202,5 +304,14 @@ def build_dataset(
             pair_labels=pair_labels,
             clip_length_frames=dataset_kwargs.get("clip_length_frames", 16),
             spatial_size=dataset_kwargs.get("spatial_size", 112),
+        )
+    if kind == "pose_attn":
+        return PoseSeqPairDataset(
+            pair_list=pair_list,
+            pair_labels=pair_labels,
+            fixed_T=dataset_kwargs.get("fixed_T", 24),
+            J=dataset_kwargs.get("J", 17),
+            random_crop=dataset_kwargs.get("random_crop", True),
+            min_conf=dataset_kwargs.get("min_conf", 1.0),
         )
     raise ValueError("Unknown dataset kind: {}".format(dataset_kind))

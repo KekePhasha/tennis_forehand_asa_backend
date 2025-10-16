@@ -118,7 +118,7 @@ def plot_roc(dist, lab, save_dir="results"):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", choices=["pure", "resnet18", "r3d_18"], required=True)
+    parser.add_argument("--backend", choices=["pure", "resnet18", "r3d_18", "pose_attn"], required=True)
     parser.add_argument("--epochs", type=int, default=20, help="Number of epochs to train for")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
@@ -136,12 +136,11 @@ def main():
         trainer = KeypointExtract()
         pairs, labels = trainer.generate_pairs()
         dataset = build_dataset("pure", pair_list=pairs, pair_labels=labels)
-    # elif args.backend == "resnet18":
-    #     # Make image pairs from a classed folder tree
-    #     pairs, labels = make_image_pairs_from_folders(args.images_root)
-    #     # Use transforms that match ResNet18 pretrained weights
-    #     tf = ResNet18_Weights.DEFAULT.transforms()
-    #     dataset = build_dataset("resnet18", pair_list=pairs, pair_labels=labels, image_transform=tf)
+    elif args.backend == "pose_attn":
+        from training.train_model import KeypointExtract
+        kp = KeypointExtract()
+        pairs, labels = kp.generate_pairs()
+        dataset = build_dataset("pose_attn", pair_list=pairs, pair_labels=labels)
     elif args.backend == "r3d_18":
         from training.pair_builder import make_video_pairs_from_folders
         pairs, labels = make_video_pairs_from_folders(args.videos_root)
@@ -203,8 +202,29 @@ def main():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if args.backend == "resnet18":
             model = create_model("resnet18", embed_dim=128, use_pretrained=True, freeze_backbone=args.freeze_backbone)
-        else:
+        elif args.backend == "r3d_18":
             model = create_model("r3d_18",  embed_dim=128, use_pretrained=True, freeze_backbone=args.freeze_backbone)
+        elif args.backend == "pose_attn":
+            # NEW: Pose + Body-Part Attention backbone wrapped as Siamese
+            from models.pose_attn.body_parts import VITPOSE_COCO17
+            model = create_model(
+                "pose_attn",
+                body_parts=VITPOSE_COCO17,
+                joint_in_dim=3,  # (x,y,conf)
+                joint_hidden=128,
+                joint_out_dim=128,
+                part_heads=4,
+                temporal_layers=2,
+                temporal_heads=4,
+                emb_dim=args.embed_dim,
+                dropout=0.1,
+                margin=args.margin,
+                return_attn=False,  # training loops expect only `dist`
+                freeze_backbone=args.freeze_backbone,  # accepted but unused; safe
+            )
+        else:
+            raise ValueError("Invalid backend")
+
         model.to(device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -213,7 +233,12 @@ def main():
             val_acc    = eval_epoch_torch(model, loader_val, margin=args.margin, device=device)
             print(f"epoch {epoch_index:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
 
-        out_path = "checkpoints/resnet18_siamese.pth" if args.backend == "resnet18" else "checkpoints/r3d18_siamese.pth"
+        if args.backend == "resnet18":
+            out_path = "checkpoints/resnet18_siamese.pth"
+        elif args.backend == "r3d_18":
+            out_path = "checkpoints/r3d18_siamese.pth"
+        else:
+            out_path = "checkpoints/pose_attn_siamese.pth"
         save_torch(model, out_path)
 
 if __name__ == "__main__":
@@ -224,6 +249,8 @@ if __name__ == "__main__":
 
 # python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true
 
+# NEW: Pose + Body-Part Attention (expects keypoint sequences)
+#python train.py --backend pose_attn --epochs 25 --batch_size 16 --lr 1e-3 --margin 0.75 --embed_dim 128
 
 # python train.py \
 #   --backend pure \
