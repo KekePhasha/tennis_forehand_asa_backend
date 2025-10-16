@@ -42,7 +42,7 @@ python train.py \
     --embed_dim 64 \
     --use_bn \
     --use_dropout
-
+  
 
 python train.py --backend pure --epochs 50 --batch_size 4 --lr 5e-4 --margin 0.5 --embed_dim 64
 

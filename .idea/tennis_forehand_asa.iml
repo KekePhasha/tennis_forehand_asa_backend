@@ -5,7 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$/mmcv" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
     </content>
-    <orderEntry type="jdk" jdkName="Python 3.9 (tennis_forehand_asa) (2)" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.9 virtualenv at /Volumes/MacStorage/PycharmProjects/tennis_forehand_asa/.venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PackageRequirementsSettings">

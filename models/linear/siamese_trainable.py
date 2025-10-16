@@ -25,16 +25,21 @@ class SiameseModelTrainable:
     """
 
     def __init__(self, input_dim=51, hidden_dim=128, embed_dim=32, seed=7,
-                 use_bn=False, use_dropout=False):
+                 use_bn=True, use_dropout=True):
 
         layers = [
             Linear(input_dim, hidden_dim, seed=seed + 1),
         ]
         if use_bn: layers.append(BatchNorm1d(hidden_dim))
         layers.append(ReLU())
-        if use_dropout: layers.append(Dropout(p=0.3))
+        if use_dropout: layers.append(Dropout(p=0.4))
 
         layers.append(Linear(hidden_dim, 64, seed=seed + 2))
+        if use_bn: layers.append(BatchNorm1d(64))
+        layers.append(ReLU())
+        if use_dropout: layers.append(Dropout(p=0.3))
+
+        layers.append(Linear(64, 64, seed=seed + 3))
         if use_bn: layers.append(BatchNorm1d(64))
         layers.append(ReLU())
         if use_dropout: layers.append(Dropout(p=0.3))
@@ -49,7 +54,13 @@ class SiameseModelTrainable:
         self.net.zero_grad()
 
     def forward_once(self, x: List[List[float]], train=True):
-        return self.net.forward(x, train=train) # caches are inside layers
+        out = self.net.forward(x, train=train)
+        # normalize each embedding vector to unit length
+        normed = []
+        for row in out:
+            norm = math.sqrt(sum(v * v for v in row))
+            normed.append([v / norm for v in row] if norm > 0 else row[:])
+        return normed
 
     def backward_once(self, d_embed: List[List[float]]):
         return self.net.backward(d_embed)

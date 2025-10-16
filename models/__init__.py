@@ -1,4 +1,3 @@
-# models/__init__.py
 from models.linear.siamese_trainable import SiameseModelTrainable
 from models.resnet.resnet_siamese import ResNetSiamese
 from models.r3d18.r3d_siamese import R3D18Siamese
