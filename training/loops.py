@@ -55,7 +55,24 @@ def train_epoch_torch(model, data_loader, optimizer, margin=1.0, device="cpu"):
         label_tensor = label_tensor.to(device)
 
         optimizer.zero_grad()
-        _, _, distance_tensor = model(left_tensor, right_tensor)
+        out = model(left_tensor, right_tensor)
+
+        # Standardize what we take as "distance"
+        if isinstance(out, dict):
+            # preferred if your model returns a dict
+            distance_tensor = out["distance"]  # change key if different
+        elif isinstance(out, tuple):
+            # common patterns: (z1, z2, distance), or extra items at the end
+            if len(out) >= 3:
+                # assume distance is last or the 3rd element; pick last scalar-like tensor
+                # safest: take the last element
+                distance_tensor = out[-1]
+            else:
+                raise ValueError(f"Unexpected tuple length from model: {len(out)}")
+        else:
+            # if model returns distance directly as a tensor
+            distance_tensor = out
+
         loss = loss_fn(distance_tensor, label_tensor)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
@@ -72,7 +89,25 @@ def eval_epoch_torch(model, data_loader, margin=1.0, device="cpu"):
         left_tensor  = left_tensor.to(device)
         right_tensor = right_tensor.to(device)
         label_tensor = label_tensor.to(device)
-        _, _, distance_tensor = model(left_tensor, right_tensor)
+
+        out = model(left_tensor, right_tensor)
+
+        # Standardize what we take as "distance"
+        if isinstance(out, dict):
+            # preferred if your model returns a dict
+            distance_tensor = out["distance"]  # change key if different
+        elif isinstance(out, tuple):
+            # common patterns: (z1, z2, distance), or extra items at the end
+            if len(out) >= 3:
+                # assume distance is last or the 3rd element; pick last scalar-like tensor
+                # safest: take the last element
+                distance_tensor = out[-1]
+            else:
+                raise ValueError(f"Unexpected tuple length from model: {len(out)}")
+        else:
+            # if model returns distance directly as a tensor
+            distance_tensor = out
+
         predictions_similar = distance_tensor < margin
         correct += (predictions_similar == (label_tensor == 0)).sum().item()
         total   += label_tensor.numel()

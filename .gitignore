@@ -1,2 +1,6 @@
 dataset
 dataset/*
+mmcv
+mmcv/*
+mmpose
+mmpose/*

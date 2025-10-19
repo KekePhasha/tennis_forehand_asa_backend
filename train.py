@@ -220,7 +220,6 @@ def main():
                 dropout=0.1,
                 margin=args.margin,
                 return_attn=False,  # training loops expect only `dist`
-                freeze_backbone=args.freeze_backbone,  # accepted but unused; safe
             )
         else:
             raise ValueError("Invalid backend")

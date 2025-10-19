@@ -112,47 +112,68 @@ class BodyPartAttention(nn.Module):
     def forward(self, h_joint, mask_joint):
         """
         h_joint:    (B,T,J,D)
-        mask_joint: (B,T,J,1)
+        mask_joint: (B,T,J,1)  float {0,1} from upstream; we’ll convert to bool for masking
         """
         device = h_joint.device
-        B,T,J,D = h_joint.shape
-        idx_tensor, idx_mask = build_part_index_tensor(self.body_parts, J, device)  # (P, L), (P, L)
+        B, T, J, D = h_joint.shape
+
+        # 1) Build part indices (P, L) with -1 padded entries
+        idx_tensor, idx_mask = build_part_index_tensor(self.body_parts, J, device)  # (P,L) long, (P,L) bool
         P, L = idx_tensor.shape
 
-        # Expand gather indices
-        idx_expanded = idx_tensor.view(1,1,P,L,1).expand(B,T,P,L,1)
-        part_mask    = idx_mask.view(1,1,P,L,1).expand(B,T,P,L,1)
+        # --- Sanity check: any real index out of bounds? ---
+        bad_hi = (idx_tensor >= 0) & (idx_tensor >= J)
+        bad_lo = (idx_tensor < -1)
+        if bad_hi.any() or bad_lo.any():
+            # Optional: raise with details so you can fix the body_parts dict
+            bad_positions = torch.nonzero(bad_hi | bad_lo, as_tuple=False)
+            raise ValueError(f"Body-part indices out of range for J={J}. Offenders at {bad_positions.tolist()}.")
 
-        # Gather joint features and masks
+        # 2) Make a VALIDITY mask for non-padded entries, and a SAFE index tensor (replace -1 -> 0)
+        valid_mask = (idx_tensor >= 0)  # (P, L) bool: True means real joint index
+        safe_idx = idx_tensor.clamp(min=0)  # (P, L) long: -1 becomes 0 (dummy)
+
+        # 3) Shape indices to match gather/take_along_dim on dim=3 (joint dim)
+        #    We want output (B,T,P,L,D), so index needs shape (B,T,P,L,D)
+        idx_full = safe_idx.view(1, 1, P, L, 1).expand(B, T, P, L, D)  # long
+        valid_full = valid_mask.view(1, 1, P, L, 1).expand(B, T, P, L, 1)  # bool
+
+        # 4) Gather features and visibility masks
         h_exp = h_joint.unsqueeze(2)  # (B,T,1,J,D)
-        h_gathered = torch.gather(h_exp, 3, idx_expanded.expand(B,T,1,L,D).repeat(1,1,P,1,1))
-        # h_gathered: (B,T,P,L,D)
+        m_exp = (mask_joint > 0.05).unsqueeze(2)  # (B,T,1,J,1)  bool
 
-        m_exp = mask_joint.unsqueeze(2)  # (B,T,1,J,1)
-        m_gathered = torch.gather(m_exp, 3, idx_expanded.expand(B,T,1,L,1).repeat(1,1,P,1,1)) & part_mask
-        m_gathered = m_gathered.float()  # (B,T,P,L,1)
+        h_gathered = torch.take_along_dim(h_exp, idx_full, dim=3)  # (B,T,P,L,D)
+        m_gathered = torch.take_along_dim(m_exp, idx_full[..., :1], dim=3)  # (B,T,P, L,1) bool
 
-        # Mask-aware mean pooling over joints in each part
+        # 5) Invalidate padded positions (where original index was -1)
+        m_gathered = m_gathered & valid_full  # keep only real joints
+        m_gathered_f = m_gathered.float()  # to weights
+
+        # 6) Mask-aware mean over L joints -> (B,T,P,D)
         eps = 1e-6
-        denom = m_gathered.sum(dim=3).clamp_min(eps)       # (B,T,P,1)
-        part_tokens = (h_gathered * m_gathered).sum(dim=3) / denom  # (B,T,P,D)
+        denom = m_gathered_f.sum(dim=3).clamp_min(eps)  # (B,T,P,1)
+        part_tokens = (h_gathered * m_gathered_f).sum(dim=3) / denom  # (B,T,P,D)
 
-        # Linear projection + self-attention over parts (per frame)
-        part_tokens = self.proj_in(part_tokens)            # (B,T,P,D)
-        bt = B*T
-        q = part_tokens.reshape(bt, P, D)                  # (B*T, P, D)
-        attn_out, attn_weights = self.attn(q, q, q, need_weights=True, average_attn_weights=False)
+        # Linear proj + self-attn over parts (per frame)
+        part_tokens = self.proj_in(part_tokens)  # (B,T,P,D)
+        bt = B * T
+        q = part_tokens.reshape(bt, P, D)  # (B*T, P, D)
+        attn_out, attn_weights = self.attn(q, q, q, need_weights=True, average_attn_weights=True)
         attn_out = self.dropout(attn_out)
-        attn_out = self.ln(q + attn_out)                   # residual
+        attn_out = self.ln(q + attn_out)
         part_out = attn_out.view(B, T, P, D)
 
-        # Aggregate attention weights across heads to get per-part importance
+        # Part importance: average attention received per part
         # attn_weights: (num_heads, B*T, P, P)
-        w = attn_weights.mean(dim=0)       # (B*T, P, P)
-        part_importance = w.mean(dim=1)    # (B*T, P) average over queries -> importance received
+        bt = B * T
+        assert attn_weights.shape == (bt, P, P), f"got {attn_weights.shape}, expected {(bt, P, P)}"
+
+        # average over queries to get how much attention each part receives
+        part_importance = attn_weights.mean(dim=1)  # (B*T, P)
         part_importance = part_importance.view(B, T, P)
 
-        return part_out, part_importance  # (B,T,P,D), (B,T,P)
+        return part_out, part_importance
+
 
 # ------------------------------------------------------------
 # 4) Temporal Transformer
