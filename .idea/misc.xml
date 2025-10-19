@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Black">
+    <option name="sdkName" value="Python 3.9 (tennis_forehand_asa) (2)" />
+  </component>
+  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.9 virtualenv at /Volumes/MacStorage/PycharmProjects/tennis_forehand_asa/.venv" project-jdk-type="Python SDK" />
+  <component name="PythonCompatibilityInspectionAdvertiser">
+    <option name="version" value="3" />
+  </component>
+</project>
