@@ -1,15 +1,9 @@
 import json
 import os
 import warnings
-
 import numpy as np
 from matplotlib import pyplot as plt
 from sklearn.metrics import roc_curve, auc
-
-# Generic: silence that urllib3 LibreSSL warning
-warnings.filterwarnings("ignore", category=Warning, module=r"urllib3(\.|$)")
-# Specific: silence the pkg_resources deprecation warning
-warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
 import argparse, torch
 from torch.utils.data import DataLoader, random_split
 from data.dataset import build_dataset
@@ -20,9 +14,13 @@ from training.loops import (
 )
 from training.train_model import KeypointExtract
 from training.checkpoints import save_pure_json, save_torch
-# If you use torchvision pretrained transforms for ResNet18:
-# from torchvision.models import ResNet18_Weights
 
+os.environ.setdefault("MMENGINE_LOG_LEVEL", "ERROR")
+
+warnings.filterwarnings("ignore", category=Warning, module=r"urllib3(\.|$)")
+# Specific: silence the pkg_resources deprecation warning
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API")
+warnings.filterwarnings("ignore", message=r"Failed to search registry with scope .*", category=UserWarning)
 
 # -----------------------------
 # Helpers
@@ -64,7 +62,7 @@ def estimate_scale(dist, lab, tau):
 def pick_tau_for_fpr(dist, lab, target_fpr=0.05):
     """
     Pick τ such that at most target_fpr of negatives (lab=1) fall below τ.
-    lab: 0=positive (similar), 1=negative (dissimilar)
+    Lab: 0=positive (similar), 1=negative (dissimilar)
     """
     neg = dist[lab == 1]
     if len(neg) == 0:
@@ -156,8 +154,8 @@ def main():
     generator = torch.Generator().manual_seed(42)
     train_set, val_set = random_split(dataset, [num_train, num_val], generator=generator)
 
-    loader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,  num_workers=2, pin_memory=True)
-    loader_val   = DataLoader(val_set,   batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=True)
+    loader_train = DataLoader(train_set, batch_size=args.batch_size, shuffle=True,  num_workers=2, pin_memory=False)
+    loader_val   = DataLoader(val_set,   batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=False)
 
     # 3) Create and train the model
     if args.backend == "pure":
@@ -175,7 +173,7 @@ def main():
         dist, lab = collect_val_dists_labels_pure(model, loader_val)
         tau, best_acc = choose_best_tau(dist, lab, steps=200)
         tau_acc, best_acc = choose_best_tau(dist, lab, steps=200)
-        print(f"[calibration-acc] τ={tau_acc:.4f} (val_acc={best_acc:.4f})")
+        print("[calibration-acc] τ=${} (val_acc=${})".format(tau_acc, best_acc))
 
         # 2) Stricter τ for 5% false positive rate
         tau_fpr = pick_tau_for_fpr(dist, lab, target_fpr=0.05)
@@ -205,7 +203,6 @@ def main():
         elif args.backend == "r3d_18":
             model = create_model("r3d_18",  embed_dim=128, use_pretrained=True, freeze_backbone=args.freeze_backbone)
         elif args.backend == "pose_attn":
-            # NEW: Pose + Body-Part Attention backbone wrapped as Siamese
             from models.pose_attn.body_parts import VITPOSE_COCO17
             model = create_model(
                 "pose_attn",
@@ -219,7 +216,7 @@ def main():
                 emb_dim=args.embed_dim,
                 dropout=0.1,
                 margin=args.margin,
-                return_attn=False,  # training loops expect only `dist`
+                return_attn=False,
             )
         else:
             raise ValueError("Invalid backend")
@@ -244,19 +241,17 @@ if __name__ == "__main__":
     main()
 
 
-#  python train.py --backend pure --epochs 30 --batch_size 32 --lr 5e-4 --margin 1.0
-
-# python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true
-
-# NEW: Pose + Body-Part Attention (expects keypoint sequences)
+"""
+Train Pose + Body-Part Attention (expects keypoint sequences)
+"""
 #python train.py --backend pose_attn --epochs 25 --batch_size 16 --lr 1e-3 --margin 0.75 --embed_dim 128
 
-# python train.py \
-#   --backend pure \
-#   --epochs 50 \
-#   --batch_size 32 \
-#   --lr 5e-4 \
-#   --margin 1.5 \
-#   --embed_dim 64 \
-#   --use_bn \
-#   --use_dropout
+"""
+Train Pure Python Siamese Network with Keypoint Embeddings
+"""
+# python train.py   --backend pure  --epochs 50  --batch_size 32 --lr 5e-4 --margin 1.5 --embed_dim 64 --use_bn --use_dropout
+
+"""
+Train R3D-18 Siamese Network (expects video clips)
+"""
+# python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true

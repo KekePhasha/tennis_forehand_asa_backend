@@ -92,7 +92,7 @@ def eval_epoch_torch(model, data_loader, margin=1.0, device="cpu"):
 
         out = model(left_tensor, right_tensor)
 
-        # Standardize what we take as "distance"
+        # Standardise what we take as "distance"
         if isinstance(out, dict):
             # preferred if your model returns a dict
             distance_tensor = out["distance"]  # change key if different
