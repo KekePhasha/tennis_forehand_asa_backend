@@ -2,7 +2,7 @@ from __future__ import annotations
 import json, math
 import numpy as np
 
-from base import BaseBackend, InferenceResult
+from webapp.backends.base import BaseBackend, InferenceResult
 from webapp.services.pose_io import ViTPoseWrapper
 from embedding.pose_embedding import PoseEmbedding
 from models import SiameseModelTrainable

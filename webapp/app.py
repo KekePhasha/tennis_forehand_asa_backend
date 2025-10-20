@@ -32,7 +32,7 @@ def analyse():
     sample_path = None
     ref_path = None
     try:
-        backend_name = (request.form.get("backend") or request.args.get("backend") or "pure").lower()
+        backend_name = (request.form.get("backend") or request.args.get("backend") or "pose_attn").lower()
         if "sample" not in request.files:
             return jsonify({"error":"Missing 'sample' file"}), 400
         sample_path = _save_temp(request.files["sample"], ".mp4")
@@ -41,6 +41,7 @@ def analyse():
         if "ref" in request.files:
             ref_path = _save_temp(request.files["ref"], ".mp4")
 
+        print("Backend Name: ", backend_name)
         backend = build_backend(backend_name)
         data = backend.preprocess(sample_path, ref_path or sample_path)  # pass sample when ref unused
         out  = backend.infer(data)
