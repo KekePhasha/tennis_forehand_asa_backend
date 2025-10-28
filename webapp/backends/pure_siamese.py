@@ -13,11 +13,12 @@ class PureSiameseBackend(BaseBackend):
     key = "pure"
 
     def __init__(self):
-        self.pose = None
+        self.pose = ViTPoseWrapper()
         self.embed = None
         self.model = None
         self.tau = TAU_DEFAULT
         self.scale = SCALE_DEFAULT
+        self._artifacts = {}
 
     def _to_list51(self, vec):
         v = np.asarray(vec, dtype=np.float32).reshape(1, -1)
@@ -52,10 +53,29 @@ class PureSiameseBackend(BaseBackend):
             self.scale = float(c.get("scale", SCALE_DEFAULT))
 
     def preprocess(self, sample_path: str, ref_path: str):
-        sample_kp, _ = self.pose.extract_keypoints(sample_path, save_name='sample')
-        ref_kp, _    = self.pose.extract_keypoints(ref_path, save_name='ref')
+        sample_kp, sample_saved = self.pose.extract_keypoints(
+            sample_path, save_name='sample', save_visual=True, save_predictions=True
+        )
+        ref_kp, ref_saved = self.pose.extract_keypoints(
+            ref_path, save_name='ref', save_visual=True, save_predictions=True
+        )
         sample_emb = self.embed.generate_embedding(sample_kp)
         ref_emb    = self.embed.generate_embedding(ref_kp)
+
+        print(f"Sample: {sample_saved}")
+        print(f"Ref:    {ref_saved}")
+
+        self._artifacts = {
+            "sample": {
+                "paths": sample_saved,
+                "urls":self.pose.paths_to_urls(sample_saved)
+            },
+            "ref": {
+                "paths": ref_saved,
+                "urls":self.pose.paths_to_urls(ref_saved)
+            }
+        }
+
         return {
             "left":  self._to_list51(sample_emb),
             "right": self._to_list51(ref_emb),
@@ -69,5 +89,6 @@ class PureSiameseBackend(BaseBackend):
             distance=distance,
             similarity_score=sim,
             is_similar=bool(distance < self.tau),
-            extras={"tau": self.tau, "scale": self.scale}
+            extras={"tau": self.tau, "scale": self.scale},
+            artifacts=self._artifacts
         )
