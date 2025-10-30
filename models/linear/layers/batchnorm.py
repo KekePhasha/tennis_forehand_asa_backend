@@ -18,6 +18,7 @@ class BatchNorm1d:
         # Gradients
         self.dgamma = [0.0] * dim
         self.dbeta = [0.0] * dim
+        self._last_norm = None
 
     def forward(self, x, train=True):
         batch_size = len(x)
@@ -47,15 +48,58 @@ class BatchNorm1d:
 
         # Normalize
         self.std_inv = [1.0 / math.sqrt(v + self.eps) for v in vars_]
+
         out = []
+        self._last_norm = []  # save normalized pre-affine for dgamma
         for row in x:
             normed = [(row[j] - means[j]) * self.std_inv[j] for j in range(features)]
+            self._last_norm.append(normed)
             out.append([self.gamma[j] * normed[j] + self.beta[j] for j in range(features)])
         return out
 
     def backward(self, grad):
-        # Simplified: pass-through, since full BN backward is complex
-        return grad
+        # grad: shape [B, F]
+        if self._last_norm is None:
+            raise RuntimeError("BatchNorm1d.backward called before forward")
+
+        B, F = len(grad), len(grad[0])
+
+        # dβ and dγ
+        for j in range(F):
+            db = 0.0;
+            dg = 0.0
+            for i in range(B):
+                g = grad[i][j]
+                db += g
+                dg += g * self._last_norm[i][j]
+            self.dbeta[j] += db
+            self.dgamma[j] += dg
+
+        # exact dX
+        dX = []
+        for i in range(B):
+            dX.append([0.0] * F)
+
+        for j in range(F):
+            inv = self.std_inv[j]
+            g_j = self.gamma[j]
+
+            # precompute sums over batch for this feature
+            sum_g = 0.0
+            sum_gx = 0.0
+            for i in range(B):
+                g = grad[i][j]
+                xh = self._last_norm[i][j]
+                sum_g += g
+                sum_gx += g * xh
+
+            scale = (g_j * inv) / max(1, B)
+            for i in range(B):
+                g = grad[i][j]
+                xh = self._last_norm[i][j]
+                dX[i][j] = scale * (B * g - sum_g - xh * sum_gx)
+
+        return dX
 
     def step(self, lr):
         self.gamma = [g - lr * dg for g, dg in zip(self.gamma, self.dgamma)]

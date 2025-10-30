@@ -25,26 +25,26 @@ class SiameseModelTrainable:
     """
 
     def __init__(self, input_dim=51, hidden_dim=128, embed_dim=32, seed=7,
-                 use_bn=True, use_dropout=True):
+                 use_bn=False, use_dropout=True):
 
         layers = [
             Linear(input_dim, hidden_dim, seed=seed + 1),
         ]
         if use_bn: layers.append(BatchNorm1d(hidden_dim))
         layers.append(ReLU())
-        if use_dropout: layers.append(Dropout(p=0.4))
+        if use_dropout: layers.append(Dropout(p=0.2))
 
         layers.append(Linear(hidden_dim, 64, seed=seed + 2))
         if use_bn: layers.append(BatchNorm1d(64))
         layers.append(ReLU())
-        if use_dropout: layers.append(Dropout(p=0.3))
+        if use_dropout: layers.append(Dropout(p=0.2))
 
         layers.append(Linear(64, 64, seed=seed + 3))
         if use_bn: layers.append(BatchNorm1d(64))
         layers.append(ReLU())
-        if use_dropout: layers.append(Dropout(p=0.3))
+        if use_dropout: layers.append(Dropout(p=0.2))
 
-        layers.append(Linear(64, embed_dim, seed=seed + 3))
+        layers.append(Linear(64, embed_dim, seed=seed + 4))
 
         self.net = Sequential(layers)
 
@@ -71,21 +71,15 @@ class SiameseModelTrainable:
     def train_batch(self, x1: List[List[float]], x2: List[List[float]], labels: List[int], lr=1e-3, margin=1.0):
         self.zero_grad()
 
-        # Forward through both towers (shared weights)
+        x1 = l2_normalize_rows(x1)
+        x2 = l2_normalize_rows(x2)
+
         z1 = self.forward_once(x1)  # [B, D]
         z2 = self.forward_once(x2)  # [B, D]
+        loss, dz1, dz2 = siamese_contrastive_backward(z1, z2, labels, margin=margin)
 
-        # Contrastive loss + grads wrt embeddings
-        labels_for_loss = [1 - int(l) for l in labels]
-        loss, dz1, dz2 = siamese_contrastive_backward(z1, z2, labels_for_loss, margin=margin)
-
-        # Backprop through each tower; since weights are shared, we must:
-        #  - run backward on z1 grads
-        #  - run backward on z2 grads (accumulate into the same parameter grads)
         self.backward_once(dz2)
         self.backward_once(dz1)
-
-        # One optimizer step for shared parameters
         self.step(lr)
         return loss
 

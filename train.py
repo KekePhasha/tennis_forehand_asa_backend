@@ -135,6 +135,23 @@ def collect_val_dists_labels_torch(model, loader, device="cpu"):
     Y = torch.cat(Y).numpy()
     return D, Y
 
+@torch.no_grad()
+def debug_label_polarity_pure(model, loader):
+    import numpy as np
+    D, Y = [], []
+    for left_vec, right_vec, label_tensor in loader:
+        L = left_vec.numpy().astype(float).tolist()
+        R = right_vec.numpy().astype(float).tolist()
+        d = model.distances(L, R)  # list of floats
+        D.extend(d)
+        Y.extend(label_tensor.numpy().astype(int).tolist())
+    D = np.asarray(D); Y = np.asarray(Y)
+    pos = D[Y == 0].mean() if (Y == 0).any() else float('nan')
+    neg = D[Y == 1].mean() if (Y == 1).any() else float('nan')
+    print(f"[PURE] mean_pos_dist(0)={pos:.4f}   mean_neg_dist(1)={neg:.4f}")
+
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -187,36 +204,45 @@ def main():
         for epoch in range(1, args.epochs + 1):
             train_loss = train_epoch_pure(model, loader_train, learning_rate=args.lr, margin=args.margin)
             val_acc    = eval_epoch_pure(model, loader_val, margin=args.margin)
-            print(f"epoch {epoch:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
+            print(f"epoch {epoch:02d} | train_loss {train_loss:.4f} | val_acc= {val_acc:.4f}")
+            debug_label_polarity_pure(model, loader_val)
             train_losses.append(train_loss)
             val_accs.append(val_acc)
 
         # Calibration
         dist, lab = collect_val_dists_labels_pure(model, loader_val)
-        tau, best_acc = choose_best_tau(dist, lab, steps=200)
-        tau_acc, best_acc = choose_best_tau(dist, lab, steps=200)
-        print("[calibration-acc] τ=${} (val_acc=${})".format(tau_acc, best_acc))
 
-        # 2) Stricter τ for 5% false positive rate
+        # 1) Pick τ by accuracy and by a target FPR=5%
+        tau_acc, acc_acc = choose_best_tau(dist, lab, steps=200)
         tau_fpr = pick_tau_for_fpr(dist, lab, target_fpr=0.05)
-        print(f"[calibration-fpr] τ={tau_fpr:.4f} (≈5% FPR)")
 
-        # Keep the stricter one if you prefer
-        tau = tau_fpr
+        # 2) Choose which τ to use (use the stricter FPR one, or switch to tau_acc)
+        tau = tau_fpr  # or: tau = tau_acc
 
+        # 3) Recompute validation accuracy USING the calibrated τ
+        val_acc_cal = eval_epoch_pure(model, loader_val, margin=tau)
+
+        # 4) Estimate display scale for your similarity mapping
         scale = estimate_scale(dist, lab, tau)
-        print(f"[final calibration] τ={tau:.4f}, scale={scale:.4f}")
 
-        # Save
+        # 5) Log everything clearly
+        print(f"[calibration] tau_acc={tau_acc:.6f} (acc≈{acc_acc:.3f}), tau_fpr5={tau_fpr:.6f}")
+        print(f"[calibration] USING tau={tau:.6f}, scale={scale:.6f}")
+        # Optional: also show what accuracy would have been at args.margin for comparison
+        acc_at_arg_margin = float(((lab == 0) == (dist < args.margin)).mean())
+        print(
+            f"[val] acc@tau(calibrated)={val_acc_cal:.4f} | acc@tau(args.margin={args.margin:.2f})={acc_at_arg_margin:.4f}")
+
+        # 6) Save model + calibration
         os.makedirs("checkpoints", exist_ok=True)
         save_pure_json(model, "checkpoints/pure_siamese.json")
         with open("checkpoints/pure_siamese_calibration.json", "w") as f:
             json.dump({"tau": float(tau), "scale": float(scale)}, f, indent=2)
 
-        # Plots
+        # 7) Plots (use calibrated τ in the distance histogram)
         save_dir = os.path.join("results", args.backend)
         plot_training_curves(train_losses, val_accs, save_dir)
-        plot_distances(dist, lab, tau, save_dir)
+        plot_distances(dist, lab, tau, save_dir)  # note: tau (calibrated), not args.margin
         plot_roc(dist, lab, save_dir)
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -257,7 +283,10 @@ def main():
         # Choose τ. You can use accuracy-optimal or FPR-targeted:
         tau_acc, acc = choose_best_tau(dist, lab, steps=200)
         tau_fpr = pick_tau_for_fpr(dist, lab, target_fpr=0.05)
-        tau = tau_fpr  # pick the stricter one (5% FPR). Or use tau_acc if you prefer.
+        if not np.isfinite(tau_fpr) or tau_fpr <= 1e-6:
+            tau = tau_acc
+        else:
+            tau = tau_fpr
 
         scale = estimate_scale(dist, lab, tau)
 
@@ -293,7 +322,7 @@ Train Pose + Body-Part Attention (expects keypoint sequences)
 
 """
 Train Pure Python Siamese Network with Keypoint Embeddings
-    python train.py   --backend pure  --epochs 50  --batch_size 32 --lr 5e-4 --margin 1.5 --embed_dim 64 --use_bn --use_dropout
+    python train.py   --backend pure  --epochs 50  --batch_size 32 --lr 5e-4 --margin 1.0 --embed_dim 64 --use_bn --use_dropout
 """
 
 """

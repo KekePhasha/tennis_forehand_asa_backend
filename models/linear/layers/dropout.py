@@ -1,7 +1,7 @@
 import random
 
 class Dropout:
-    def __init__(self, p=0.5, seed=None):
+    def __init__(self, p=0.2, seed=None):
         self.p = p
         self.mask = None
         if seed is not None:
