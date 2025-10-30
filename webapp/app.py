@@ -1,5 +1,8 @@
+import json
 import os, tempfile, traceback, logging, warnings
 from pathlib import Path
+from typing import Optional, List
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from registry import build_backend
@@ -26,6 +29,23 @@ def to_abs(url_path: str) -> str:
         return request.host_url.rstrip('/') + url_path
     return url_path
 
+def _parse_parts(raw: Optional[str]) -> Optional[List[str]]:
+    """
+    Parse JSON array of body parts from the form.
+    Returns None if missing, invalid, or empty => meaning 'use all parts'.
+    """
+    if not raw:
+        return None
+    try:
+        val = json.loads(raw)
+        if isinstance(val, list):
+            clean = [str(x) for x in val if isinstance(x, (str, int))]
+            # If empty list -> use all (signal with None)
+            return clean or None
+    except Exception:
+        pass
+    return None
+
 @app.route("/analyse", methods=["POST"])
 def analyse():
     """
@@ -48,15 +68,28 @@ def analyse():
         if "ref" in request.files:
             ref_path = _save_temp(request.files["ref"], ".mp4")
 
+        parts = _parse_parts(request.form.get("parts"))
+
         print("Backend Name: ", backend_name)
         backend = build_backend(backend_name)
-        data = backend.preprocess(sample_path, ref_path or sample_path)  # pass sample when ref unused
-        out  = backend.infer(data)
+
+        # Pass parts only to pose_attn (others ignore extra kw)
+        pre_kwargs = {}
+        infer_kwargs = {}
+
+        if backend_name == "pose_attn":
+            pre_kwargs["parts"] = parts   # None => use all in backend
+            infer_kwargs["parts"] = parts
+
+        data = backend.preprocess(sample_path, ref_path or sample_path, **pre_kwargs)  # pass sample when ref unused
+        out  = backend.infer(data, **infer_kwargs)
 
         extras = dict(out.get("extras", {}))
         if "artifacts" in out and out["artifacts"]:
             extras["artifacts"] = out["artifacts"]
 
+
+        # Absolute URLs for static files
         arts = extras.get("artifacts", {})
         for side in ("sample", "ref"):
             if side in arts and "urls" in arts[side]:

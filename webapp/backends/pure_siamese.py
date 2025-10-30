@@ -2,12 +2,14 @@ from __future__ import annotations
 import json, math
 import numpy as np
 
+from utils.latents import pca_2d
 from webapp.backends.base import BaseBackend, InferenceResult
 from webapp.services.pose_io import ViTPoseWrapper
 from embedding.pose_embedding import PoseEmbedding
 from models import SiameseModelTrainable
 from training.checkpoints import load_pure_json
 from webapp.config import CHECKPOINTS, TAU_DEFAULT, SCALE_DEFAULT
+
 
 class PureSiameseBackend(BaseBackend):
     key = "pure"
@@ -60,24 +62,36 @@ class PureSiameseBackend(BaseBackend):
             ref_path, save_name='ref', save_visual=True, save_predictions=True
         )
         sample_emb = self.embed.generate_embedding(sample_kp)
-        ref_emb    = self.embed.generate_embedding(ref_kp)
+        ref_emb = self.embed.generate_embedding(ref_kp)
 
-        print(f"Sample: {sample_saved}")
-        print(f"Ref:    {ref_saved}")
+        # 4) format for model + projection input
+        left = self._to_list51(sample_emb)  # (1,51) list
+        right = self._to_list51(ref_emb)  # (1,51) list
+        # stack for PCA: shape (2,51)
+        X = np.stack([np.array(left[0], np.float32), np.array(right[0], np.float32)], axis=0)
+        XY = pca_2d(X).tolist()  # [[sx,sy], [rx,ry]] in [0,1]
 
         self._artifacts = {
             "sample": {
                 "paths": sample_saved,
-                "urls":self.pose.paths_to_urls(sample_saved)
+                "urls": self.pose.paths_to_urls(sample_saved),
+                "embedding": {
+                    "vector": left[0],
+                    "proj2d": XY[0]
+                }
             },
             "ref": {
                 "paths": ref_saved,
-                "urls":self.pose.paths_to_urls(ref_saved)
+                "urls": self.pose.paths_to_urls(ref_saved),
+                "embedding": {
+                    "vector": right[0],
+                    "proj2d": XY[1]
+                }
             }
         }
 
         return {
-            "left":  self._to_list51(sample_emb),
+            "left": self._to_list51(sample_emb),
             "right": self._to_list51(ref_emb),
         }
 

@@ -1,21 +1,60 @@
 from __future__ import annotations
+from typing import Optional, List, Iterable, Set
 import torch
-from .base import BaseBackend, InferenceResult
 from models.pose_attn.siamese_wrapper import SiameseWrapper
 from models.pose_attn.pose_bodypart_attn import PoseBodyPartAttentionModel
+from webapp.backends.base import BaseBackend, InferenceResult
 from webapp.config import CHECKPOINTS
 from webapp.services.pose_io import ViTPoseWrapper
 
-# COCO/ViTPose-17 joint groups (edit if you use a different skeleton)
+# ViTPose-17 joint groups (edit if you use a different skeleton)
 BODY_PARTS = {
     "head":        [0,1,2,3,4],     # nose, eyes, ears
     "shoulders":   [5,6],
     "elbows":      [7,8],
     "wrists":      [9,10],
     "hips":        [11,12],
-    "knees":       [13,14],
-    "ankles":      [15,16],
+    # merge knees + ankles to keep 6 groups total
+    "legs":        [13,14,15,16],
 }
+
+NUM_JOINTS = 17
+
+def _normalize_parts(parts: Optional[Iterable]) -> Optional[List[int]]:
+    """
+    Convert `parts` (list of ints/strings) into a sorted list of unique valid joint indices.
+    Returns None if parts is None or empty AFTER cleaning => 'use all'.
+    """
+    if parts is None:
+        return None
+    cleaned: Set[int] = set()
+    for p in parts:
+        try:
+            i = int(p)
+        except Exception:
+            continue
+        if 0 <= i < NUM_JOINTS:
+            cleaned.add(i)
+    if not cleaned:
+        return None
+    return sorted(cleaned)
+
+def _apply_joint_mask(x: torch.Tensor, keep_idx: Optional[List[int]]) -> torch.Tensor:
+    """
+    x: (B, T, J, 3). If keep_idx is provided, zero-out joints not in keep_idx.
+    Returns same tensor (in-place safe for speed).
+    """
+    if keep_idx is None:
+        return x
+    # Build a mask for joints to zero
+    J = x.shape[2]
+    device = x.device
+    keep = torch.zeros(J, dtype=torch.bool, device=device)
+    keep[keep_idx] = True
+    drop = ~keep
+    if drop.any():
+        x[:, :, drop, :] = 0.0
+    return x
 
 class PoseAttnBackend(BaseBackend):
     key = "pose_attn"
@@ -25,9 +64,9 @@ class PoseAttnBackend(BaseBackend):
         self.pose = None
         self.model = None
         self.tau = float(tau)
+        self.used_parts: Optional[List[int]] = None
 
     def _build_backbone(self) -> PoseBodyPartAttentionModel:
-        # match your training dims
         return PoseBodyPartAttentionModel(
             body_parts=BODY_PARTS,
             joint_in_dim=3,          # (x,y,conf)
@@ -49,11 +88,9 @@ class PoseAttnBackend(BaseBackend):
         self.model = SiameseWrapper(backbone=backbone, margin=0.5, return_attn=True).to(self.device).eval()
 
         state = torch.load(ckpt, map_location=self.device)
-        # Handle different checkpoint formats (direct state_dict, wrapped, EMA, etc.)
         if isinstance(state, dict) and "state_dict" in state:
             state = state["state_dict"]
 
-        # If keys are prefixed (e.g., "backbone."), try stripping/prefixing as needed
         try:
             self.model.load_state_dict(state, strict=True)
         except RuntimeError:
@@ -63,25 +100,53 @@ class PoseAttnBackend(BaseBackend):
             except Exception as e:
                 raise RuntimeError(f"Failed to load pose_attn checkpoint: {e}")
 
-    def preprocess(self, sample_path: str, ref_path: str):
-        # Return tensors (B,T,J,3) on the right device
-        xL, _ = self.pose.extract_keypoints(sample_path, save_name='sample', as_tensor=True, device=self.device)
-        xR, _ = self.pose.extract_keypoints(ref_path,    save_name='ref',    as_tensor=True, device=self.device)
+    def preprocess(self, sample_path: str, ref_path: str, parts: Optional[Iterable] = None):
+        """
+        Expect ViTPoseWrapper.extract_keypoints(...) -> (np.ndarray[T,J,3], extras)
+        """
+        import numpy as np
+        import torch
 
-        # Ensure batch dim
-        if xL.ndim == 3: xL = xL.unsqueeze(0)  # (1,T,J,3)
-        if xR.ndim == 3: xR = xR.unsqueeze(0)
-        return {"left": xL.to(self.device), "right": xR.to(self.device)}
+        # 1) call wrapper WITHOUT unsupported kwargs
+        xL_np, _ = self.pose.extract_keypoints(sample_path, save_name='sample')
+        xR_np, _ = self.pose.extract_keypoints(ref_path, save_name='ref')
+
+        # 2) sanity checks & dtype
+        if not isinstance(xL_np, np.ndarray) or not isinstance(xR_np, np.ndarray):
+            raise RuntimeError("extract_keypoints must return numpy arrays shaped (T, J, 3).")
+        if xL_np.ndim != 3 or xR_np.ndim != 3 or xL_np.shape[2] != 3 or xR_np.shape[2] != 3:
+            raise RuntimeError(f"Expected (T,J,3); got {xL_np.shape} and {xR_np.shape}.")
+        if xL_np.shape[1] != NUM_JOINTS or xR_np.shape[1] != NUM_JOINTS:
+            raise RuntimeError(f"Expected {NUM_JOINTS} joints; got {xL_np.shape[1]} and {xR_np.shape[1]}.")
+
+        # 3) to torch on the right device, add batch dim -> (1,T,J,3)
+        xL = torch.from_numpy(xL_np).float().unsqueeze(0).to(self.device)
+        xR = torch.from_numpy(xR_np).float().unsqueeze(0).to(self.device)
+
+        # 4) normalize/keep selected joints (None => use all)
+        keep_idx = _normalize_parts(parts)
+        self.used_parts = keep_idx
+        xL = _apply_joint_mask(xL, keep_idx)
+        xR = _apply_joint_mask(xR, keep_idx)
+
+        return {"left": xL, "right": xR}
 
     @torch.no_grad()
-    def infer(self, data):
-        # SiameseWrapper returns: dist, (attn1, attn2)
+    def infer(self, data, parts: Optional[Iterable] = None):
+        """
+        Run the pose attention Siamese model and return a standardised result.
+        :param data: Dict with tensors "left" and "right" of shape (B,T,J,3)
+        :param parts: (ignored here, used in preprocessing)
+        :return: InferenceResult with distance, similarity_score, is_similar, extras
+        """
+
         dist, _ = self.model(data["left"], data["right"])
         d = float(dist.squeeze().item())
         sim = 1.0 / (1.0 + d)
+
         return InferenceResult(
             distance=d,
             similarity_score=sim,
             is_similar=bool(d < self.tau),
-            extras={}
+            extras={"used_parts": "all" if self.used_parts is None else self.used_parts}
         )
