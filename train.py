@@ -100,7 +100,7 @@ def plot_distances(dist, lab, tau, save_dir="results"):
 
 def plot_roc(dist, lab, save_dir="results"):
     os.makedirs(save_dir, exist_ok=True)
-    fpr, tpr, _ = roc_curve(lab, -dist)  # smaller distance = positive
+    fpr, tpr, _ = roc_curve(lab, -dist, pos_label=0)
     roc_auc = auc(fpr, tpr)
     plt.figure()
     plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.2f}")
@@ -112,6 +112,28 @@ def plot_roc(dist, lab, save_dir="results"):
     plt.savefig(os.path.join(save_dir, "roc.png"))
     plt.close()
 
+def collect_val_dists_labels_torch(model, loader, device="cpu"):
+    model.eval()
+    D, Y = [], []
+    for batch in loader:
+        # Expect (left, right, label) — adapt names if needed
+        if len(batch) == 3:
+            left, right, lab = batch
+        else:
+            raise RuntimeError("Expected (left, right, label) from dataset.")
+
+        left  = left.to(device)
+        right = right.to(device)
+
+        out = model(left, right)
+        # Handle both "dist" or "(dist, (attn1, attn2))"
+        dist = out[0] if isinstance(out, (tuple, list)) else out  # shape (B,)
+        D.append(dist.detach().float().cpu())
+        Y.append(lab.detach().long().cpu())
+
+    D = torch.cat(D).numpy()
+    Y = torch.cat(Y).numpy()
+    return D, Y
 
 
 def main():
@@ -229,6 +251,19 @@ def main():
             val_acc    = eval_epoch_torch(model, loader_val, margin=args.margin, device=device)
             print(f"epoch {epoch_index:02d} | train_loss {train_loss:.4f} | val_acc@τ={args.margin:.2f} {val_acc:.4f}")
 
+        # --- Calibration on validation set ---
+        dist, lab = collect_val_dists_labels_torch(model, loader_val, device=device)
+
+        # Choose τ. You can use accuracy-optimal or FPR-targeted:
+        tau_acc, acc = choose_best_tau(dist, lab, steps=200)
+        tau_fpr = pick_tau_for_fpr(dist, lab, target_fpr=0.05)
+        tau = tau_fpr  # pick the stricter one (5% FPR). Or use tau_acc if you prefer.
+
+        scale = estimate_scale(dist, lab, tau)
+
+        print(
+            f"[pose_attn calibration] τ_acc={tau_acc:.4f} (acc≈{acc:.3f}), τ_fpr5={tau_fpr:.4f}  → using τ={tau:.4f}, scale={scale:.4f}")
+
         if args.backend == "resnet18":
             out_path = "checkpoints/resnet18_siamese.pth"
         elif args.backend == "r3d_18":
@@ -237,21 +272,31 @@ def main():
             out_path = "checkpoints/pose_attn_siamese.pth"
         save_torch(model, out_path)
 
+        # Save calibration JSON (name matches what your backend expects)
+        calib_name = {
+            "pose_attn": "pose_attn_calibration.json",
+            "resnet18": "resnet18_calibration.json",
+            "r3d_18": "r3d18_calibration.json",
+        }[args.backend]
+        os.makedirs("checkpoints", exist_ok=True)
+        with open(os.path.join("checkpoints", calib_name), "w") as f:
+            json.dump({"tau": float(tau), "scale": float(scale)}, f, indent=2)
+
 if __name__ == "__main__":
     main()
 
 
 """
 Train Pose + Body-Part Attention (expects keypoint sequences)
+    python train.py --backend pose_attn --epochs 25 --batch_size 16 --lr 1e-3 --margin 0.75 --embed_dim 128
 """
-#python train.py --backend pose_attn --epochs 25 --batch_size 16 --lr 1e-3 --margin 0.75 --embed_dim 128
 
 """
 Train Pure Python Siamese Network with Keypoint Embeddings
+    python train.py   --backend pure  --epochs 50  --batch_size 32 --lr 5e-4 --margin 1.5 --embed_dim 64 --use_bn --use_dropout
 """
-# python train.py   --backend pure  --epochs 50  --batch_size 32 --lr 5e-4 --margin 1.5 --embed_dim 64 --use_bn --use_dropout
 
 """
 Train R3D-18 Siamese Network (expects video clips)
+    python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true
 """
-# python train.py --backend r3d_18  --videos_root dataset/VIDEO_RGB/forehand_openstands --epochs 10 --batch_size 2 --lr 1e-3 --margin 1.0 --freeze_backbone true

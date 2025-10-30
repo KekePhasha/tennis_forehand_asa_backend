@@ -8,7 +8,7 @@ from flask_cors import CORS
 from registry import build_backend
 from webapp.config import CLEAN_CORS
 
-# Quiet noisy libs (optional)
+
 os.environ.setdefault("MMENGINE_LOG_LEVEL", "ERROR")
 logging.basicConfig(level=logging.ERROR, force=True)
 for name in ["mmengine","mmengine.fileio","mmcv","mmpose","mmdet"]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 from typing import Optional, List, Iterable, Set
+
+import math
 import torch
 from models.pose_attn.siamese_wrapper import SiameseWrapper
 from models.pose_attn.pose_bodypart_attn import PoseBodyPartAttentionModel
@@ -9,16 +11,16 @@ from webapp.services.pose_io import ViTPoseWrapper
 
 # ViTPose-17 joint groups (edit if you use a different skeleton)
 BODY_PARTS = {
-    "head":        [0,1,2,3,4],     # nose, eyes, ears
-    "shoulders":   [5,6],
-    "elbows":      [7,8],
-    "wrists":      [9,10],
-    "hips":        [11,12],
-    # merge knees + ankles to keep 6 groups total
-    "legs":        [13,14,15,16],
+    "head": [0, 1, 2, 3, 4],  # nose, eyes, ears
+    "torso": [5, 6, 11, 12],  # L-shoulder, R-shoulder, L-hip, R-hip
+    "left_arm": [5, 7, 9],  # L-shoulder, L-elbow, L-wrist
+    "right_arm": [6, 8, 10],  # R-shoulder, R-elbow, R-wrist
+    "left_leg": [11, 13, 15],  # L-hip, L-knee, L-ankle
+    "right_leg": [12, 14, 16],  # R-hip, R-knee, R-ankle
 }
 
 NUM_JOINTS = 17
+
 
 def _normalize_parts(parts: Optional[Iterable]) -> Optional[List[int]]:
     """
@@ -39,6 +41,7 @@ def _normalize_parts(parts: Optional[Iterable]) -> Optional[List[int]]:
         return None
     return sorted(cleaned)
 
+
 def _apply_joint_mask(x: torch.Tensor, keep_idx: Optional[List[int]]) -> torch.Tensor:
     """
     x: (B, T, J, 3). If keep_idx is provided, zero-out joints not in keep_idx.
@@ -56,6 +59,7 @@ def _apply_joint_mask(x: torch.Tensor, keep_idx: Optional[List[int]]) -> torch.T
         x[:, :, drop, :] = 0.0
     return x
 
+
 class PoseAttnBackend(BaseBackend):
     key = "pose_attn"
 
@@ -65,11 +69,12 @@ class PoseAttnBackend(BaseBackend):
         self.model = None
         self.tau = float(tau)
         self.used_parts: Optional[List[int]] = None
+        self.calib_scale = 0.05
 
     def _build_backbone(self) -> PoseBodyPartAttentionModel:
         return PoseBodyPartAttentionModel(
             body_parts=BODY_PARTS,
-            joint_in_dim=3,          # (x,y,conf)
+            joint_in_dim=3,  # (x,y,conf)
             joint_hidden=128,
             joint_out_dim=128,
             part_heads=4,
@@ -87,7 +92,9 @@ class PoseAttnBackend(BaseBackend):
         backbone = self._build_backbone().to(self.device)
         self.model = SiameseWrapper(backbone=backbone, margin=0.5, return_attn=True).to(self.device).eval()
 
+        # Load checkpoint
         state = torch.load(ckpt, map_location=self.device)
+        # Check for wrapped state_dict
         if isinstance(state, dict) and "state_dict" in state:
             state = state["state_dict"]
 
@@ -99,6 +106,19 @@ class PoseAttnBackend(BaseBackend):
                 self.model.backbone.load_state_dict(state, strict=True)
             except Exception as e:
                 raise RuntimeError(f"Failed to load pose_attn checkpoint: {e}")
+
+        # Load calibration if present
+        calib = CHECKPOINTS / "pose_attn_calibration.json"
+        if calib.exists():
+            import json, math
+            with open(calib) as f:
+                cfg = json.load(f)
+            tau = float(cfg.get("tau", self.tau))
+            scale = float(cfg.get("scale", self.calib_scale))
+            if not math.isfinite(scale) or scale <= 0:
+                scale = self.calib_scale  # fall back if bad
+            self.tau, self.calib_scale = tau, scale
+            print(f"[pose_attn] loaded calibration: tau={self.tau:.4f}, scale={self.calib_scale:.4f}")
 
     def preprocess(self, sample_path: str, ref_path: str, parts: Optional[Iterable] = None):
         """
@@ -123,7 +143,7 @@ class PoseAttnBackend(BaseBackend):
         xL = torch.from_numpy(xL_np).float().unsqueeze(0).to(self.device)
         xR = torch.from_numpy(xR_np).float().unsqueeze(0).to(self.device)
 
-        # 4) normalize/keep selected joints (None => use all)
+        # 4) normalise/keep selected joints (None => use all)
         keep_idx = _normalize_parts(parts)
         self.used_parts = keep_idx
         xL = _apply_joint_mask(xL, keep_idx)
@@ -142,11 +162,19 @@ class PoseAttnBackend(BaseBackend):
 
         dist, _ = self.model(data["left"], data["right"])
         d = float(dist.squeeze().item())
-        sim = 1.0 / (1.0 + d)
+        if d <= 1e-12:
+            sim = 1.0
+        else:
+            display_scale = max(1e-12, self.tau / 4.595)  # ln(99) → ~99% at d=0
+            sim = 1.0 / (1.0 + math.exp((d - self.tau) / display_scale))
 
         return InferenceResult(
             distance=d,
             similarity_score=sim,
             is_similar=bool(d < self.tau),
-            extras={"used_parts": "all" if self.used_parts is None else self.used_parts}
+            extras={
+                "used_parts": "all" if self.used_parts is None else self.used_parts,
+                "tau": self.tau,
+                "scale": self.calib_scale,
+            }
         )
