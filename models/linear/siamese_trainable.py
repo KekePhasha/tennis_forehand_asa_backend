@@ -76,7 +76,8 @@ class SiameseModelTrainable:
         z2 = self.forward_once(x2)  # [B, D]
 
         # Contrastive loss + grads wrt embeddings
-        loss, dz1, dz2 = siamese_contrastive_backward(z1, z2, labels, margin=margin)
+        labels_for_loss = [1 - int(l) for l in labels]
+        loss, dz1, dz2 = siamese_contrastive_backward(z1, z2, labels_for_loss, margin=margin)
 
         # Backprop through each tower; since weights are shared, we must:
         #  - run backward on z1 grads

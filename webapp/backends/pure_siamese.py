@@ -34,6 +34,12 @@ class PureSiameseBackend(BaseBackend):
         z = (self.tau - float(distance)) / max(1e-6, float(self.scale))
         return 1.0 / (1.0 + math.exp(-z))
 
+    def _ui_score(self, d: float) -> float:
+        if d <= 1e-12:
+            return 1.0
+        ui_scale = max(1e-12, self.tau / 4.595)  # ln(99)
+        return 1.0 / (1.0 + math.exp((d - self.tau) / ui_scale))
+
     def load(self) -> None:
         # pose/keypoints & embedding
         self.pose = ViTPoseWrapper()
@@ -98,7 +104,7 @@ class PureSiameseBackend(BaseBackend):
     def infer(self, data):
         left, right = data["left"], data["right"]
         distance = float(self.model.distances(left, right, train=False)[0])
-        sim = self._prob_similar(distance)
+        sim = self._ui_score(distance)
         return InferenceResult(
             distance=distance,
             similarity_score=sim,

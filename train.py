@@ -12,7 +12,7 @@ from training.loops import (
     train_epoch_pure, eval_epoch_pure,
     train_epoch_torch, eval_epoch_torch,
 )
-from training.train_model import KeypointExtract
+
 from training.checkpoints import save_pure_json, save_torch
 
 os.environ.setdefault("MMENGINE_LOG_LEVEL", "ERROR")
@@ -167,7 +167,7 @@ def main():
         dataset = build_dataset("r3d_18", pair_list=pairs, pair_labels=labels,
                                 clip_length_frames=8, spatial_size=96)
     else:
-        raise NotImplementedError("backend must be one of: pure, resnet18, r3d_18")
+        raise NotImplementedError("backend must be one of: pure, pose_attn, r3d_18")
 
 
     # 2) Split into train/val
