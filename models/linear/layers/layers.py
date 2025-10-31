@@ -8,10 +8,10 @@ from models.linear.core.tensor import zeros2
 class Linear:
     """
     y = x @ W^T + b
-    x: [B, in_f], W: [out_f, in_f], b: [out_f]
+    Shapes:
+    x: [B, in_f], w: [out_f, in_f], b: [out_f], y: [B, out_f]
     """
     def __init__(self, in_f, out_f, seed=42):
-        # Xavier init
         random.seed(seed)
         lim = 0.5 * math.sqrt(6.0/(in_f+out_f))
         self.W = [[random.uniform(-lim, lim) for _ in range(in_f)] for _ in range(out_f)]
