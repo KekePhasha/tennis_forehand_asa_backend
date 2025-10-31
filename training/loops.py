@@ -84,6 +84,7 @@ def train_epoch_torch(model, data_loader, optimizer, margin=1.0, device="cpu"):
 def eval_epoch_torch(model, data_loader, margin=1.0, device="cpu"):
     model.eval()
     correct, total = 0, 0
+
     for left_tensor, right_tensor, label_tensor in data_loader:
         left_tensor  = left_tensor.to(device)
         right_tensor = right_tensor.to(device)
@@ -91,23 +92,25 @@ def eval_epoch_torch(model, data_loader, margin=1.0, device="cpu"):
 
         out = model(left_tensor, right_tensor)
 
-        # Standardise what we take as "distance"
+        # Standardize to a 1-D distance tensor: shape (B,)
         if isinstance(out, dict):
-            # preferred if your model returns a dict
-            distance_tensor = out["distance"]  # change key if different
-        elif isinstance(out, tuple):
-            # common patterns: (z1, z2, distance), or extra items at the end
-            if len(out) >= 3:
-                # assume distance is last or the 3rd element; pick last scalar-like tensor
-                # safest: take the last element
-                distance_tensor = out[-1]
-            else:
-                raise ValueError(f"Unexpected tuple length from model: {len(out)}")
+            dist = out["distance"]
+        elif isinstance(out, (tuple, list)):
+            dist = out[-1]               # last item should be distance
         else:
-            # if model returns distance directly as a tensor
-            distance_tensor = out
+            dist = out                   # model returns distance directly
 
-        predictions_similar = distance_tensor < margin
-        correct += (predictions_similar == (label_tensor == 0)).sum().item()
-        total   += label_tensor.numel()
+        if dist.ndim > 1:                # e.g., model returned (B, D) embeddings/distances
+            dist = dist.norm(dim=1)      # collapse to per-sample scalar
+
+        dist = dist.view(-1)             # ensure (B,)
+        preds_similar = dist < margin    # True if predicted similar
+
+        # labels: 0 = similar, 1 = dissimilar
+        target_similar = (label_tensor == 0).view(-1)
+
+        correct += (preds_similar == target_similar).sum().item()
+        total   += target_similar.numel()
+
     return correct / max(1, total)
+
