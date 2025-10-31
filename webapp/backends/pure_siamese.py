@@ -31,8 +31,11 @@ class PureSiameseBackend(BaseBackend):
         return v.tolist()
 
     def _prob_similar(self, distance: float) -> float:
+        # probability that the pair is similar
         z = (self.tau - float(distance)) / max(1e-6, float(self.scale))
-        return 1.0 / (1.0 + math.exp(-z))
+        p = 1.0 / (1.0 + math.exp(-z))
+        # avoid exact 0/1 for UX
+        return float(min(max(p, 1e-6), 1.0 - 1e-6))
 
     def _ui_score(self, d: float) -> float:
         if d <= 1e-12:
@@ -104,7 +107,7 @@ class PureSiameseBackend(BaseBackend):
     def infer(self, data):
         left, right = data["left"], data["right"]
         distance = float(self.model.distances(left, right, train=False)[0])
-        sim = self._ui_score(distance)
+        sim = self._prob_similar(distance)
         return InferenceResult(
             distance=distance,
             similarity_score=sim,
